@@ -1,0 +1,13 @@
+{
+  "name": "whale",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --filter @whale/cli dev",
+    "build": "pnpm -r build",
+    "test": "vitest"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}
