@@ -54,6 +54,11 @@ impl StoreManager {
         stores.get(name).cloned()
     }
 
+    pub fn list_all(&self) -> HashMap<String, HashMap<String, Value>> {
+        let stores = self.inner.stores.lock().unwrap();
+        stores.clone()
+    }
+
     pub fn set(&self, name: &str, key: &str, value: Value) -> Option<HashMap<String, Value>> {
         let mut stores = self.inner.stores.lock().unwrap();
         if let Some(store) = stores.get_mut(name) {
@@ -488,6 +493,30 @@ mod tests {
     }
 
     // --- 파일에서 로드 테스트 ---
+    #[test]
+    fn test_list_all_returns_all_stores() {
+        let mgr = StoreManager::new(None);
+        let mut d1 = HashMap::new();
+        d1.insert("a".to_string(), json!(1));
+        mgr.register("s1", d1);
+
+        let mut d2 = HashMap::new();
+        d2.insert("b".to_string(), json!(2));
+        mgr.register("s2", d2);
+
+        let all = mgr.list_all();
+        assert_eq!(all.len(), 2);
+        assert_eq!(all.get("s1").unwrap().get("a"), Some(&json!(1)));
+        assert_eq!(all.get("s2").unwrap().get("b"), Some(&json!(2)));
+    }
+
+    #[test]
+    fn test_list_all_empty_returns_empty() {
+        let mgr = StoreManager::new(None);
+        let all = mgr.list_all();
+        assert!(all.is_empty());
+    }
+
     #[test]
     fn test_new_loads_from_existing_file() {
         let dir = std::env::temp_dir().join("whale_test_load");

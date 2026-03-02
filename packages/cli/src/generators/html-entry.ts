@@ -87,5 +87,41 @@ if (import.meta.hot) {
     entries.set(label, htmlPath)
   }
 
+  // Auto-generate devtools entry in development mode
+  if (mode === 'development') {
+    const devtoolsBootstrapFileName = '__whale_entry___devtools__.ts'
+    const devtoolsBootstrapPath = join(outDirAbs, devtoolsBootstrapFileName)
+    const devtoolsBootstrap = `import { createComponent } from 'solid-js'
+import { render } from 'solid-js/web'
+import DevTools from '@whale/sdk/devtools'
+
+const root = document.getElementById('root')
+if (!root) {
+  throw new Error('[whale] Missing #root container for "__devtools__" window')
+}
+
+render(() => createComponent(DevTools, {}), root)
+`
+
+    const devtoolsHtml = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" href="data:," />
+  <title>${config.app.name} - DevTools</title>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="./${devtoolsBootstrapFileName}"></script>
+</body>
+</html>`
+
+    const devtoolsHtmlPath = join(outDirAbs, '__devtools__.html')
+    writeFileSync(devtoolsBootstrapPath, devtoolsBootstrap)
+    writeFileSync(devtoolsHtmlPath, devtoolsHtml)
+    entries.set('__devtools__', devtoolsHtmlPath)
+  }
+
   return entries
 }

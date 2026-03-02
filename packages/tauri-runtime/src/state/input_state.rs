@@ -1,10 +1,11 @@
 use rdev::{listen, EventType, Key};
+use serde::Serialize;
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use tauri::{AppHandle, Emitter};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct HotkeyEntry {
     pub keys: Vec<String>,
     pub id: String,
@@ -54,6 +55,11 @@ impl InputManager {
         active_hotkeys.remove(id);
     }
 
+    pub fn list_hotkeys(&self) -> Vec<HotkeyEntry> {
+        let hotkeys = self.hotkeys.lock().unwrap();
+        hotkeys.clone()
+    }
+
     pub fn start_listener(&self, app_handle: AppHandle) {
         let mut running = self.listener_running.lock().unwrap();
         if *running {
@@ -72,6 +78,17 @@ impl InputManager {
                     EventType::KeyRelease(key) => (key_to_hotkey_name(key), false),
                     _ => return,
                 };
+
+                // Emit raw key event for devtools
+                if cfg!(debug_assertions) {
+                    let _ = app_handle.emit(
+                        "input:key-event",
+                        &serde_json::json!({
+                            "key": &key_name,
+                            "pressed": is_press,
+                        }),
+                    );
+                }
 
                 let transitions = {
                     let hotkeys_guard = hotkeys.lock().unwrap();
@@ -274,6 +291,25 @@ mod tests {
         assert_eq!(t4.released, vec!["combo".to_string()]);
         assert_eq!(t5.pressed, vec!["combo".to_string()]);
         assert!(t5.released.is_empty());
+    }
+
+    #[test]
+    fn test_list_hotkeys_returns_registered() {
+        let mgr = InputManager::new();
+        mgr.register_hotkey("god_mode", vec!["f1".to_string()]);
+        mgr.register_hotkey("ammo", vec!["f2".to_string()]);
+
+        let list = mgr.list_hotkeys();
+        assert_eq!(list.len(), 2);
+        assert_eq!(list[0].id, "god_mode");
+        assert_eq!(list[1].id, "ammo");
+    }
+
+    #[test]
+    fn test_list_hotkeys_empty() {
+        let mgr = InputManager::new();
+        let list = mgr.list_hotkeys();
+        assert!(list.is_empty());
     }
 
     #[test]

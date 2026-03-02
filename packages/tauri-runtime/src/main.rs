@@ -3,7 +3,7 @@ mod commands;
 mod preamble;
 mod state;
 
-use tauri::Manager;
+use tauri::{Listener, Manager};
 
 use state::frida_state::FridaManager;
 use state::input_state::InputManager;
@@ -52,6 +52,9 @@ pub fn run() {
       commands::frida_cmd::frida_load_script_file,
       commands::frida_cmd::frida_unload_script,
       commands::frida_cmd::frida_detach,
+      // DevTools
+      commands::devtools_cmd::devtools_list_stores,
+      commands::devtools_cmd::devtools_list_hotkeys,
     ])
     .setup(|app| {
       if cfg!(debug_assertions) {
@@ -79,6 +82,31 @@ pub fn run() {
       // Start global key listener (rdev)
       let input_manager = app.state::<InputManager>();
       input_manager.start_listener(app.handle().clone());
+
+      // DevTools: register F12 toggle hotkey in debug mode
+      if cfg!(debug_assertions) {
+          input_manager.register_hotkey("__devtools_toggle__", vec!["f12".to_string()]);
+
+          let app_handle = app.handle().clone();
+          app.listen("input:hotkey-triggered", move |event| {
+              if let Ok(payload) = serde_json::from_str::<serde_json::Value>(event.payload()) {
+                  if payload.get("id").and_then(|v| v.as_str()) == Some("__devtools_toggle__")
+                      && payload.get("phase").and_then(|v| v.as_str()) == Some("press")
+                  {
+                      if let Some(win) = app_handle.get_webview_window("__devtools__") {
+                          let visible = win.is_visible().unwrap_or(false);
+                          if visible {
+                              let _ = win.hide();
+                          } else {
+                              let _ = win.show();
+                              let _ = win.set_focus();
+                          }
+                      }
+                  }
+              }
+          });
+      }
+
       Ok(())
     })
     .run(tauri::generate_context!())

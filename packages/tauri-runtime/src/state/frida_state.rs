@@ -1,8 +1,8 @@
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::mpsc;
 
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
 
 // ---------------------------------------------------------------------------
 // Data types returned to the frontend
@@ -101,6 +101,13 @@ impl frida::ScriptHandler for WhaleScriptHandler {
                     format!("{:?}", log_msg.level),
                     log_msg.payload
                 );
+                if cfg!(debug_assertions) {
+                    let _ = self.app.emit("devtools:log", &serde_json::json!({
+                        "source": "frida",
+                        "level": format!("{:?}", log_msg.level).to_lowercase(),
+                        "message": &log_msg.payload,
+                    }));
+                }
             }
             frida::Message::Error(ref err_msg) => {
                 log::info!(
@@ -110,6 +117,13 @@ impl frida::ScriptHandler for WhaleScriptHandler {
                     err_msg.line_number,
                     err_msg.column_number
                 );
+                if cfg!(debug_assertions) {
+                    let _ = self.app.emit("devtools:log", &serde_json::json!({
+                        "source": "frida",
+                        "level": "error",
+                        "message": format!("{} at {}:{}:{}", err_msg.description, err_msg.file_name, err_msg.line_number, err_msg.column_number),
+                    }));
+                }
             }
             frida::Message::Other(ref val) => {
                 // Whale's send({__whale: true, ...}) arrives here when the
@@ -146,11 +160,6 @@ pub struct FridaManager {
     tx: mpsc::Sender<FridaRequest>,
 }
 
-// FridaManager only contains mpsc::Sender which is Send+Sync.
-// The raw frida pointers live exclusively on the worker thread.
-unsafe impl Send for FridaManager {}
-unsafe impl Sync for FridaManager {}
-
 impl FridaManager {
     /// Spawn the dedicated frida worker thread and return a handle.
     pub fn new(app: AppHandle) -> Self {
@@ -172,6 +181,9 @@ impl FridaManager {
             // pointers remain valid. We box them and transmute to 'static.
             let mut sessions: HashMap<String, Box<frida::Session<'static>>> = HashMap::new();
             let mut scripts: HashMap<String, Box<frida::Script<'static>>> = HashMap::new();
+            // Track ownership to safely unload scripts before a session is detached.
+            let mut script_sessions: HashMap<String, String> = HashMap::new();
+            let mut session_scripts: HashMap<String, HashSet<String>> = HashMap::new();
 
             let mut session_counter: u64 = 0;
             let mut script_counter: u64 = 0;
@@ -358,6 +370,11 @@ impl FridaManager {
                                     let script_static: frida::Script<'static> =
                                         unsafe { std::mem::transmute(script) };
                                     scripts.insert(scid.clone(), Box::new(script_static));
+                                    script_sessions.insert(scid.clone(), session_id.clone());
+                                    session_scripts
+                                        .entry(session_id.clone())
+                                        .or_default()
+                                        .insert(scid.clone());
                                     log::info!(
                                         "[whale:frida] loaded script {} in {}",
                                         scid,
@@ -382,6 +399,16 @@ impl FridaManager {
 
                     FridaRequest::UnloadScript { script_id, reply } => {
                         if let Some(script) = scripts.remove(&script_id) {
+                            if let Some(session_id) = script_sessions.remove(&script_id) {
+                                let mut remove_entry = false;
+                                if let Some(ids) = session_scripts.get_mut(&session_id) {
+                                    ids.remove(&script_id);
+                                    remove_entry = ids.is_empty();
+                                }
+                                if remove_entry {
+                                    session_scripts.remove(&session_id);
+                                }
+                            }
                             match script.unload() {
                                 Ok(()) => {
                                     log::info!(
@@ -406,9 +433,26 @@ impl FridaManager {
                     }
 
                     FridaRequest::Detach { session_id, reply } => {
-                        if let Some(session) = sessions.remove(&session_id) {
+                        if let Some(script_ids) = session_scripts.remove(&session_id) {
+                            for script_id in script_ids {
+                                script_sessions.remove(&script_id);
+                                if let Some(script) = scripts.remove(&script_id) {
+                                    if let Err(e) = script.unload() {
+                                        log::warn!(
+                                            "[whale:frida] failed to unload script {} before detach {}: {}",
+                                            script_id,
+                                            session_id,
+                                            e
+                                        );
+                                    }
+                                }
+                            }
+                        }
+
+                        if let Some(session) = sessions.get(&session_id) {
                             match session.detach() {
                                 Ok(()) => {
+                                    sessions.remove(&session_id);
                                     log::info!(
                                         "[whale:frida] detached session {}",
                                         session_id
@@ -435,6 +479,8 @@ impl FridaManager {
             log::info!("[whale:frida] worker thread shutting down");
             // sessions, scripts, device_manager, frida drop here in order
             drop(scripts);
+            drop(script_sessions);
+            drop(session_scripts);
             drop(sessions);
         });
 

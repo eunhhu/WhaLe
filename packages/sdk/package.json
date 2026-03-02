@@ -8,6 +8,10 @@
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./devtools": {
+      "import": "./src/devtools/entry.tsx",
+      "types": "./src/devtools/entry.tsx"
     }
   },
   "scripts": {

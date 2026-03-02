@@ -117,6 +117,20 @@ export function generateTauriConf(
   const windows = Object.entries(config.windows).map(([label, wc]) =>
     toTauriWindow(label, wc),
   )
+
+  // Auto-inject devtools window in development mode
+  if (mode === 'development') {
+    windows.push({
+      label: '__devtools__',
+      url: '__devtools__.html',
+      width: 900,
+      height: 600,
+      resizable: true,
+      decorations: true,
+      visible: false,
+    })
+  }
+
   const bundleIcon = resolveBundleIcon(config, projectRoot)
 
   const buildConf: TauriConf['build'] =

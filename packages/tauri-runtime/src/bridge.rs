@@ -20,6 +20,15 @@ pub fn parse_whale_message(message: &Value) -> Option<(String, HashMap<String, V
 /// Frida 스크립트에서 send()된 메시지를 처리
 /// __whale 마커가 있으면 store를 자동 업데이트하고 윈도우에 emit
 pub fn handle_frida_message(app: &AppHandle, message: &Value) {
+    // Emit to devtools in debug mode
+    if cfg!(debug_assertions) {
+        let _ = app.emit("devtools:log", &serde_json::json!({
+            "source": "frida",
+            "level": "info",
+            "message": message.to_string(),
+        }));
+    }
+
     if let Some((store_name, patch_map)) = parse_whale_message(message) {
         let store_manager = app.state::<StoreManager>();
         store_manager.merge_patch(&store_name, patch_map.clone());
