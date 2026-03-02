@@ -3,8 +3,9 @@
   "compilerOptions": {
     "jsx": "preserve",
     "jsxImportSource": "solid-js",
-    "rootDir": "src",
-    "outDir": "dist"
+    "rootDir": ".",
+    "outDir": "dist",
+    "noEmit": true
   },
-  "include": ["src"]
+  "include": ["src", "whale.config.ts"]
 }
