@@ -1,0 +1,23 @@
+{
+  "productName": "whale-dev",
+  "identifier": "com.whale.dev",
+  "build": {
+    "frontendDist": "../sdk/dist",
+    "devUrl": "http://localhost:5173"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "WhaLe Dev",
+        "width": 600,
+        "height": 450
+      }
+    ]
+  },
+  "bundle": {
+    "icon": [
+      "icons/icon.png"
+    ]
+  }
+}
