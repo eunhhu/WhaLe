@@ -2,7 +2,8 @@
   "name": "whale",
   "private": true,
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "apps/*"
   ],
   "scripts": {
     "dev": "bun --filter @whale/cli dev",
