@@ -18,6 +18,8 @@ interface SpawnAttachPayload {
   pid: number
 }
 
+let spawnAttachSupport: boolean | undefined
+
 export function useDevice(filter?: { type?: 'usb' | 'local' | 'remote'; id?: string }): DeviceHandle {
   const [device, setDevice] = createSignal<Device | null>(null)
   const [status, setStatus] = createSignal<'searching' | 'connected' | 'disconnected'>('searching')
@@ -43,9 +45,14 @@ export function useDevice(filter?: { type?: 'usb' | 'local' | 'remote'; id?: str
     if (!dev) throw new Error('No device connected')
 
     // Prefer single-roundtrip spawn+attach to reduce IPC latency.
-    const spawned = await safeInvoke<SpawnAttachPayload>('frida_spawn_attach', { deviceId: dev.id, program, ...(opts || {}) })
-    if (spawned?.sessionId && typeof spawned.pid === 'number') {
-      return { id: spawned.sessionId, pid: spawned.pid }
+    if (spawnAttachSupport !== false) {
+      const spawned = await safeInvoke<SpawnAttachPayload>('frida_spawn_attach', { deviceId: dev.id, program, ...(opts || {}) })
+      if (spawned?.sessionId && typeof spawned.pid === 'number') {
+        spawnAttachSupport = true
+        return { id: spawned.sessionId, pid: spawned.pid }
+      }
+      // If command is unavailable in this runtime, avoid retrying it on every spawn.
+      spawnAttachSupport = false
     }
 
     // Backward-compatible fallback when runtime doesn't expose frida_spawn_attach yet.

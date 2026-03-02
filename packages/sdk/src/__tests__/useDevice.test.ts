@@ -7,7 +7,10 @@ vi.mock('@tauri-apps/api/event', () => ({
 }))
 
 describe('useDevice', () => {
-  beforeEach(() => { vi.clearAllMocks() })
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.resetModules()
+  })
 
   it('should return device state and spawn/attach methods', async () => {
     const { useDevice } = await import('../hooks/useDevice')
@@ -80,6 +83,40 @@ describe('useDevice', () => {
       deviceId: 'usb-1',
       pid: 4242,
     }))
+
+    dispose?.()
+  })
+
+  it('should cache unsupported frida_spawn_attach and skip retry on next spawn', async () => {
+    const { invoke } = await import('@tauri-apps/api/core')
+    const mockInvoke = vi.mocked(invoke)
+    mockInvoke
+      .mockResolvedValueOnce([
+        { id: 'usb-1', name: 'Test iPhone', type: 'usb' },
+      ] as never)
+      .mockResolvedValueOnce(undefined as never) // first spawn_attach unsupported
+      .mockResolvedValueOnce(1001 as never) // first spawn
+      .mockResolvedValueOnce('sess-1' as never) // first attach
+      .mockResolvedValueOnce(1002 as never) // second spawn
+      .mockResolvedValueOnce('sess-2' as never) // second attach
+
+    const { useDevice } = await import('../hooks/useDevice')
+    let dispose: (() => void) | undefined
+    const dev = createRoot((d) => {
+      dispose = d
+      return useDevice({ type: 'usb' })
+    })
+
+    await dev.refresh()
+
+    const s1 = await dev.spawn('com.example.one')
+    const s2 = await dev.spawn('com.example.two')
+    expect(s1).toEqual({ id: 'sess-1', pid: 1001 })
+    expect(s2).toEqual({ id: 'sess-2', pid: 1002 })
+
+    const calls = mockInvoke.mock.calls.map(([cmd]) => cmd)
+    const spawnAttachCalls = calls.filter((cmd) => cmd === 'frida_spawn_attach')
+    expect(spawnAttachCalls.length).toBe(1)
 
     dispose?.()
   })
