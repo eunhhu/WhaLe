@@ -95,13 +95,7 @@ impl InputManager {
                         pressed_keys,
                         active_hotkeys,
                     } = &mut *guard;
-                    apply_hotkey_event(
-                        hotkeys,
-                        pressed_keys,
-                        active_hotkeys,
-                        key_name,
-                        is_press,
-                    )
+                    apply_hotkey_event(hotkeys, pressed_keys, active_hotkeys, key_name, is_press)
                 };
 
                 for id in transitions.pressed {
@@ -123,14 +117,13 @@ impl InputManager {
 }
 
 fn env_flag_enabled(name: &str) -> bool {
-    matches!(
-        std::env::var(name)
-            .ok()
-            .as_deref()
-            .map(str::to_ascii_lowercase)
-            .as_deref(),
-        Some("1" | "true" | "yes" | "on")
-    )
+    match std::env::var(name) {
+        Ok(v) => !matches!(
+            v.to_ascii_lowercase().as_str(),
+            "0" | "false" | "no" | "off"
+        ),
+        Err(_) => true,
+    }
 }
 
 fn devtools_input_event_stream_enabled() -> bool {
@@ -178,9 +171,7 @@ fn normalize_hotkey_key(key: &str) -> String {
         "control" | "ctrl" | "controlleft" | "controlright" => "ctrl".to_string(),
         "shift" | "shiftleft" | "shiftright" => "shift".to_string(),
         "alt" | "altleft" | "altright" | "altgr" => "alt".to_string(),
-        "meta" | "metaleft" | "metaright" | "super" | "cmd" | "command" => {
-            "meta".to_string()
-        }
+        "meta" | "metaleft" | "metaright" | "super" | "cmd" | "command" => "meta".to_string(),
         "return" => "enter".to_string(),
         "esc" => "escape".to_string(),
         other => other.to_string(),
@@ -292,7 +283,13 @@ mod tests {
         let mut pressed = HashSet::new();
         let mut active = HashSet::new();
 
-        let t1 = apply_hotkey_event(&hotkeys, &mut pressed, &mut active, "ctrl".to_string(), true);
+        let t1 = apply_hotkey_event(
+            &hotkeys,
+            &mut pressed,
+            &mut active,
+            "ctrl".to_string(),
+            true,
+        );
         let t2 = apply_hotkey_event(&hotkeys, &mut pressed, &mut active, "f1".to_string(), true);
         let t3 = apply_hotkey_event(&hotkeys, &mut pressed, &mut active, "f1".to_string(), true);
         let t4 = apply_hotkey_event(&hotkeys, &mut pressed, &mut active, "f1".to_string(), false);

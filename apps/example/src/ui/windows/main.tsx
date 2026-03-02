@@ -21,6 +21,13 @@ export default function Main() {
             {trainer.godMode || trainer.infiniteAmmo ? 'ACTIVE' : 'IDLE'}
           </Badge>
         </Flex>
+        <Flex>
+          <Button onClick={() => device.refresh()}>Refresh</Button>
+          <Button onClick={() => device.spawn('com.tencent.xin', { realm: "emulated" })}>Spawn</Button>
+          <Button onClick={() => device.attach(12345)}>Attach</Button>
+          <Button onClick={() => device.enumerateProcesses()}>Enumerate Processes</Button>
+          <Button onClick={() => device.resume(12345)}>Resume</Button>
+        </Flex>
 
         <Card>
           <Flex direction="column" gap={3}>

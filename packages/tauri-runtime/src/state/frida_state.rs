@@ -75,6 +75,12 @@ pub enum FridaRequest {
     LoadScript {
         session_id: String,
         code: String,
+        store_name: Option<String>,
+        reply: channel::Sender<FridaResponse>,
+    },
+    UpdateStore {
+        store_name: String,
+        patch: HashMap<String, serde_json::Value>,
         reply: channel::Sender<FridaResponse>,
     },
     UnloadScript {
@@ -88,14 +94,13 @@ pub enum FridaRequest {
 }
 
 fn env_flag_enabled(name: &str) -> bool {
-    matches!(
-        std::env::var(name)
-            .ok()
-            .as_deref()
-            .map(str::to_ascii_lowercase)
-            .as_deref(),
-        Some("1" | "true" | "yes" | "on")
-    )
+    match std::env::var(name) {
+        Ok(v) => !matches!(
+            v.to_ascii_lowercase().as_str(),
+            "0" | "false" | "no" | "off"
+        ),
+        Err(_) => true,
+    }
 }
 
 fn devtools_frida_log_stream_enabled() -> bool {
@@ -132,11 +137,14 @@ impl frida::ScriptHandler for WhaleScriptHandler {
                     log_msg.payload
                 );
                 if cfg!(debug_assertions) && devtools_frida_log_stream_enabled() {
-                    let _ = self.app.emit("devtools:log", &serde_json::json!({
-                        "source": "frida",
-                        "level": format!("{:?}", log_msg.level).to_lowercase(),
-                        "message": &log_msg.payload,
-                    }));
+                    let _ = self.app.emit(
+                        "devtools:log",
+                        &serde_json::json!({
+                            "source": "frida",
+                            "level": format!("{:?}", log_msg.level).to_lowercase(),
+                            "message": &log_msg.payload,
+                        }),
+                    );
                 }
             }
             frida::Message::Error(ref err_msg) => {
@@ -202,7 +210,10 @@ impl FridaManager {
             let frida = unsafe { frida::Frida::obtain() };
             let device_manager = frida::DeviceManager::obtain(&frida);
 
-            log::info!("[whale:frida] frida {} initialized", frida::Frida::version());
+            log::info!(
+                "[whale:frida] frida {} initialized",
+                frida::Frida::version()
+            );
 
             // We store sessions and scripts using raw pointers because the
             // frida types carry lifetime parameters tied to their parent.
@@ -214,6 +225,9 @@ impl FridaManager {
             // Track ownership to safely unload scripts before a session is detached.
             let mut script_sessions: HashMap<String, String> = HashMap::new();
             let mut session_scripts: HashMap<String, HashSet<String>> = HashMap::new();
+            // Track store-bound scripts so store updates can be pushed to recv('config').
+            let mut script_stores: HashMap<String, String> = HashMap::new();
+            let mut store_scripts: HashMap<String, HashSet<String>> = HashMap::new();
 
             let mut session_counter: u64 = 0;
             let mut script_counter: u64 = 0;
@@ -265,36 +279,34 @@ impl FridaManager {
                         device_id,
                         program,
                         reply,
-                    } => {
-                        match device_manager.get_device_by_id(&device_id) {
-                            Ok(mut device) => {
-                                let opts = frida::SpawnOptions::new();
-                                match device.spawn(&program, &opts) {
-                                    Ok(pid) => {
-                                        log::debug!(
-                                            "[whale:frida] spawned {} on {} -> pid {}",
-                                            program,
-                                            device_id,
-                                            pid
-                                        );
-                                        let _ = reply.send(FridaResponse::Pid(Ok(pid)));
-                                    }
-                                    Err(e) => {
-                                        let _ = reply.send(FridaResponse::Pid(Err(format!(
-                                            "Spawn failed: {}",
-                                            e
-                                        ))));
-                                    }
+                    } => match device_manager.get_device_by_id(&device_id) {
+                        Ok(mut device) => {
+                            let opts = frida::SpawnOptions::new();
+                            match device.spawn(&program, &opts) {
+                                Ok(pid) => {
+                                    log::debug!(
+                                        "[whale:frida] spawned {} on {} -> pid {}",
+                                        program,
+                                        device_id,
+                                        pid
+                                    );
+                                    let _ = reply.send(FridaResponse::Pid(Ok(pid)));
+                                }
+                                Err(e) => {
+                                    let _ = reply.send(FridaResponse::Pid(Err(format!(
+                                        "Spawn failed: {}",
+                                        e
+                                    ))));
                                 }
                             }
-                            Err(e) => {
-                                let _ = reply.send(FridaResponse::Pid(Err(format!(
-                                    "Device lookup failed ({}): {}",
-                                    device_id, e
-                                ))));
-                            }
                         }
-                    }
+                        Err(e) => {
+                            let _ = reply.send(FridaResponse::Pid(Err(format!(
+                                "Device lookup failed ({}): {}",
+                                device_id, e
+                            ))));
+                        }
+                    },
 
                     FridaRequest::SpawnAttach {
                         device_id,
@@ -308,8 +320,10 @@ impl FridaManager {
                                     Ok(pid) => match device.attach(pid) {
                                         Ok(session) => {
                                             session_counter += 1;
-                                            let sid =
-                                                format!("session_{}_{}", device_id, session_counter);
+                                            let sid = format!(
+                                                "session_{}_{}",
+                                                device_id, session_counter
+                                            );
                                             // SAFETY: session is derived from device which is derived
                                             // from device_manager which lives for the thread lifetime.
                                             let session_static: frida::Session<'static> =
@@ -355,32 +369,26 @@ impl FridaManager {
                         device_id,
                         pid,
                         reply,
-                    } => {
-                        match device_manager.get_device_by_id(&device_id) {
-                            Ok(device) => match device.resume(pid) {
-                                Ok(()) => {
-                                    log::debug!(
-                                        "[whale:frida] resumed pid {} on {}",
-                                        pid,
-                                        device_id
-                                    );
-                                    let _ = reply.send(FridaResponse::Unit(Ok(())));
-                                }
-                                Err(e) => {
-                                    let _ = reply.send(FridaResponse::Unit(Err(format!(
-                                        "Resume failed: {}",
-                                        e
-                                    ))));
-                                }
-                            },
+                    } => match device_manager.get_device_by_id(&device_id) {
+                        Ok(device) => match device.resume(pid) {
+                            Ok(()) => {
+                                log::debug!("[whale:frida] resumed pid {} on {}", pid, device_id);
+                                let _ = reply.send(FridaResponse::Unit(Ok(())));
+                            }
                             Err(e) => {
                                 let _ = reply.send(FridaResponse::Unit(Err(format!(
-                                    "Device lookup failed ({}): {}",
-                                    device_id, e
+                                    "Resume failed: {}",
+                                    e
                                 ))));
                             }
+                        },
+                        Err(e) => {
+                            let _ = reply.send(FridaResponse::Unit(Err(format!(
+                                "Device lookup failed ({}): {}",
+                                device_id, e
+                            ))));
                         }
-                    }
+                    },
 
                     FridaRequest::Attach {
                         device_id,
@@ -398,11 +406,7 @@ impl FridaManager {
                                     let session_static: frida::Session<'static> =
                                         unsafe { std::mem::transmute(session) };
                                     sessions.insert(sid.clone(), Box::new(session_static));
-                                    log::debug!(
-                                        "[whale:frida] attached to pid {} -> {}",
-                                        pid,
-                                        sid
-                                    );
+                                    log::debug!("[whale:frida] attached to pid {} -> {}", pid, sid);
                                     let _ = reply.send(FridaResponse::SessionId(Ok(sid)));
                                 }
                                 Err(e) => {
@@ -424,6 +428,7 @@ impl FridaManager {
                     FridaRequest::LoadScript {
                         session_id,
                         code,
+                        store_name,
                         reply,
                     } => {
                         if let Some(session) = sessions.get(&session_id) {
@@ -431,21 +436,21 @@ impl FridaManager {
                             match session.create_script(&code, &mut opts) {
                                 Ok(mut script) => {
                                     // Set up message handler
-                                    let handler = WhaleScriptHandler {
-                                        app: app.clone(),
-                                    };
+                                    let handler = WhaleScriptHandler { app: app.clone() };
                                     if let Err(e) = script.handle_message(handler) {
-                                        let _ = reply.send(FridaResponse::ScriptId(Err(
-                                            format!("Failed to set message handler: {}", e),
-                                        )));
+                                        let _ = reply.send(FridaResponse::ScriptId(Err(format!(
+                                            "Failed to set message handler: {}",
+                                            e
+                                        ))));
                                         continue;
                                     }
 
                                     // Load the script
                                     if let Err(e) = script.load() {
-                                        let _ = reply.send(FridaResponse::ScriptId(Err(
-                                            format!("Script load failed: {}", e),
-                                        )));
+                                        let _ = reply.send(FridaResponse::ScriptId(Err(format!(
+                                            "Script load failed: {}",
+                                            e
+                                        ))));
                                         continue;
                                     }
 
@@ -460,6 +465,10 @@ impl FridaManager {
                                         .entry(session_id.clone())
                                         .or_default()
                                         .insert(scid.clone());
+                                    if let Some(name) = store_name {
+                                        script_stores.insert(scid.clone(), name.clone());
+                                        store_scripts.entry(name).or_default().insert(scid.clone());
+                                    }
                                     log::debug!(
                                         "[whale:frida] loaded script {} in {}",
                                         scid,
@@ -482,8 +491,61 @@ impl FridaManager {
                         }
                     }
 
+                    FridaRequest::UpdateStore {
+                        store_name,
+                        patch,
+                        reply,
+                    } => {
+                        let script_ids =
+                            store_scripts.get(&store_name).cloned().unwrap_or_default();
+                        if script_ids.is_empty() {
+                            let _ = reply.send(FridaResponse::Unit(Ok(())));
+                            continue;
+                        }
+
+                        let message = serde_json::json!({
+                            "type": "config",
+                            "payload": patch,
+                        })
+                        .to_string();
+
+                        let mut failed = Vec::new();
+                        for script_id in script_ids {
+                            match scripts.get(&script_id) {
+                                Some(script) => {
+                                    if let Err(err) = script.post(&message, None) {
+                                        failed.push(format!("{} ({})", script_id, err));
+                                    }
+                                }
+                                None => {
+                                    failed.push(format!("{} (not found)", script_id));
+                                }
+                            }
+                        }
+
+                        if failed.is_empty() {
+                            let _ = reply.send(FridaResponse::Unit(Ok(())));
+                        } else {
+                            let _ = reply.send(FridaResponse::Unit(Err(format!(
+                                "Failed to update {} script(s): {}",
+                                failed.len(),
+                                failed.join(", ")
+                            ))));
+                        }
+                    }
+
                     FridaRequest::UnloadScript { script_id, reply } => {
                         if let Some(script) = scripts.remove(&script_id) {
+                            if let Some(store_name) = script_stores.remove(&script_id) {
+                                let mut remove_entry = false;
+                                if let Some(ids) = store_scripts.get_mut(&store_name) {
+                                    ids.remove(&script_id);
+                                    remove_entry = ids.is_empty();
+                                }
+                                if remove_entry {
+                                    store_scripts.remove(&store_name);
+                                }
+                            }
                             if let Some(session_id) = script_sessions.remove(&script_id) {
                                 let mut remove_entry = false;
                                 if let Some(ids) = session_scripts.get_mut(&session_id) {
@@ -496,10 +558,7 @@ impl FridaManager {
                             }
                             match script.unload() {
                                 Ok(()) => {
-                                    log::debug!(
-                                        "[whale:frida] unloaded script {}",
-                                        script_id
-                                    );
+                                    log::debug!("[whale:frida] unloaded script {}", script_id);
                                     let _ = reply.send(FridaResponse::Unit(Ok(())));
                                 }
                                 Err(e) => {
@@ -521,6 +580,16 @@ impl FridaManager {
                         if let Some(script_ids) = session_scripts.remove(&session_id) {
                             for script_id in script_ids {
                                 script_sessions.remove(&script_id);
+                                if let Some(store_name) = script_stores.remove(&script_id) {
+                                    let mut remove_entry = false;
+                                    if let Some(ids) = store_scripts.get_mut(&store_name) {
+                                        ids.remove(&script_id);
+                                        remove_entry = ids.is_empty();
+                                    }
+                                    if remove_entry {
+                                        store_scripts.remove(&store_name);
+                                    }
+                                }
                                 if let Some(script) = scripts.remove(&script_id) {
                                     if let Err(e) = script.unload() {
                                         log::warn!(
@@ -538,10 +607,7 @@ impl FridaManager {
                             match session.detach() {
                                 Ok(()) => {
                                     sessions.remove(&session_id);
-                                    log::debug!(
-                                        "[whale:frida] detached session {}",
-                                        session_id
-                                    );
+                                    log::debug!("[whale:frida] detached session {}", session_id);
                                     let _ = reply.send(FridaResponse::Unit(Ok(())));
                                 }
                                 Err(e) => {
@@ -566,6 +632,8 @@ impl FridaManager {
             drop(scripts);
             drop(script_sessions);
             drop(session_scripts);
+            drop(script_stores);
+            drop(store_scripts);
             drop(sessions);
         });
 
@@ -578,7 +646,6 @@ impl FridaManager {
             tx: self.tx.clone(),
         }
     }
-
 }
 
 // ---------------------------------------------------------------------------

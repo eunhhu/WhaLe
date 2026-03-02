@@ -19,14 +19,13 @@ pub fn parse_whale_message(message: &Value) -> Option<(String, HashMap<String, V
 }
 
 fn env_flag_enabled(name: &str) -> bool {
-    matches!(
-        std::env::var(name)
-            .ok()
-            .as_deref()
-            .map(str::to_ascii_lowercase)
-            .as_deref(),
-        Some("1" | "true" | "yes" | "on")
-    )
+    match std::env::var(name) {
+        Ok(v) => !matches!(
+            v.to_ascii_lowercase().as_str(),
+            "0" | "false" | "no" | "off"
+        ),
+        Err(_) => true,
+    }
 }
 
 fn devtools_frida_log_stream_enabled() -> bool {
@@ -39,11 +38,14 @@ fn devtools_frida_log_stream_enabled() -> bool {
 pub fn handle_frida_message(app: &AppHandle, message: &Value) {
     // Emit to devtools in debug mode
     if cfg!(debug_assertions) && devtools_frida_log_stream_enabled() {
-        let _ = app.emit("devtools:log", &serde_json::json!({
-            "source": "frida",
-            "level": "info",
-            "message": message.to_string(),
-        }));
+        let _ = app.emit(
+            "devtools:log",
+            &serde_json::json!({
+                "source": "frida",
+                "level": "info",
+                "message": message.to_string(),
+            }),
+        );
     }
 
     if let Some((store_name, patch_map)) = parse_whale_message(message) {
@@ -65,6 +67,10 @@ pub fn handle_frida_message(app: &AppHandle, message: &Value) {
         } else {
             for label in targets {
                 let _ = app.emit_to(&label, "store:changed", &payload);
+            }
+            // DevTools should always observe store updates in debug mode.
+            if cfg!(debug_assertions) {
+                let _ = app.emit_to("__devtools__", "store:changed", &payload);
             }
         }
     }

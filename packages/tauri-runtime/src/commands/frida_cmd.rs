@@ -27,11 +27,7 @@ fn request_processes(
     }
 }
 
-fn request_spawn(
-    frida: &FridaSender,
-    device_id: String,
-    program: String,
-) -> Result<u32, String> {
+fn request_spawn(frida: &FridaSender, device_id: String, program: String) -> Result<u32, String> {
     match frida.send(|reply| FridaRequest::Spawn {
         device_id,
         program,
@@ -83,10 +79,12 @@ fn request_load_script(
     frida: &FridaSender,
     session_id: String,
     code: String,
+    store_name: Option<String>,
 ) -> Result<String, String> {
     match frida.send(|reply| FridaRequest::LoadScript {
         session_id,
         code,
+        store_name,
         reply,
     }) {
         FridaResponse::ScriptId(r) => r,
@@ -108,7 +106,10 @@ fn request_detach(frida: &FridaSender, session_id: String) -> Result<(), String>
     }
 }
 
-fn resolve_spawn_target(program: Option<String>, bundle_id: Option<String>) -> Result<String, String> {
+fn resolve_spawn_target(
+    program: Option<String>,
+    bundle_id: Option<String>,
+) -> Result<String, String> {
     program
         .or(bundle_id)
         .ok_or_else(|| "Missing required spawn target: provide program (or bundleId)".to_string())
@@ -221,9 +222,11 @@ pub async fn frida_load_script(
     };
 
     let sender = frida.inner().clone_sender();
-    tauri::async_runtime::spawn_blocking(move || request_load_script(&sender, session_id, final_code))
-        .await
-        .map_err(|e| format!("Task join error: {}", e))?
+    tauri::async_runtime::spawn_blocking(move || {
+        request_load_script(&sender, session_id, final_code, store_name)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
 /// Load a script from a file path
@@ -251,9 +254,11 @@ pub async fn frida_load_script_file(
     };
 
     let sender = frida.inner().clone_sender();
-    tauri::async_runtime::spawn_blocking(move || request_load_script(&sender, session_id, final_code))
-        .await
-        .map_err(|e| format!("Task join error: {}", e))?
+    tauri::async_runtime::spawn_blocking(move || {
+        request_load_script(&sender, session_id, final_code, store_name)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
 /// Unload a script

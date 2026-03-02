@@ -1,3 +1,4 @@
+use crate::state::frida_state::{FridaManager, FridaRequest, FridaResponse};
 use crate::state::store_state::StoreManager;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -23,6 +24,7 @@ pub fn store_get(
 #[tauri::command]
 pub fn store_set(
     app: AppHandle,
+    frida: State<'_, FridaManager>,
     store_manager: State<'_, StoreManager>,
     name: String,
     key: String,
@@ -36,6 +38,21 @@ pub fn store_set(
             "store": name,
             "patch": patch,
         });
+        let sender = frida.inner().clone_sender();
+        let frida_store_name = name.clone();
+        let frida_patch = patch.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            if let FridaResponse::Unit(Err(err)) = sender.send(|reply| FridaRequest::UpdateStore {
+                store_name: frida_store_name,
+                patch: frida_patch,
+                reply,
+            }) {
+                log::debug!(
+                    "[whale:frida] failed to forward store patch to scripts: {}",
+                    err
+                );
+            }
+        });
         let changed_keys: Vec<String> = patch.keys().cloned().collect();
         let targets = store_manager.get_subscribed_windows(&name, &changed_keys);
         if targets.is_empty() {
@@ -44,6 +61,9 @@ pub fn store_set(
         } else {
             for label in targets {
                 let _ = app.emit_to(&label, "store:changed", &payload);
+            }
+            if cfg!(debug_assertions) {
+                let _ = app.emit_to("__devtools__", "store:changed", &payload);
             }
         }
     }
@@ -68,26 +88,17 @@ pub fn store_subscribe(
 }
 
 #[tauri::command]
-pub fn store_unsubscribe(
-    store_manager: State<'_, StoreManager>,
-    name: String,
-    window: String,
-) {
+pub fn store_unsubscribe(store_manager: State<'_, StoreManager>, name: String, window: String) {
     store_manager.unsubscribe(&name, &window);
 }
 
 #[tauri::command]
-pub fn store_get_persist_enabled(
-    store_manager: State<'_, StoreManager>,
-) -> bool {
+pub fn store_get_persist_enabled(store_manager: State<'_, StoreManager>) -> bool {
     store_manager.is_persist_enabled()
 }
 
 #[tauri::command]
-pub fn store_set_persist_enabled(
-    store_manager: State<'_, StoreManager>,
-    enabled: bool,
-) -> bool {
+pub fn store_set_persist_enabled(store_manager: State<'_, StoreManager>, enabled: bool) -> bool {
     store_manager.set_persist_enabled(enabled);
     true
 }

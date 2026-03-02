@@ -49,6 +49,10 @@ export const StoreInspector: Component = () => {
   const commitEdit = (storeName: string, key: string) => {
     try {
       const parsed = JSON.parse(editValue())
+      setStores((prev) => ({
+        ...prev,
+        [storeName]: { ...prev[storeName], [key]: parsed },
+      }))
       safeInvokeVoid('store_set', { name: storeName, key, value: parsed })
       setEditingKey(null)
     } catch {
