@@ -1,5 +1,5 @@
 import { Component, JSX, splitProps, mergeProps, createSignal } from 'solid-js'
-import { colors, radius } from '../theme/tokens'
+import { colors, radius, transition } from '../theme/tokens'
 
 export interface SwitchProps {
   checked?: boolean
@@ -32,11 +32,12 @@ export const Switch: Component<SwitchProps> = (props) => {
     width: `${TRACK_WIDTH}px`,
     height: `${TRACK_HEIGHT}px`,
     'border-radius': `${TRACK_HEIGHT / 2}px`,
-    background: isChecked() ? colors.accent : colors.primary,
+    background: isChecked() ? colors.accent : colors.border,
     cursor: local.disabled ? 'not-allowed' : 'pointer',
     opacity: local.disabled ? '0.5' : '1',
     position: 'relative',
-    transition: 'background 0.2s ease',
+    border: `1px solid ${colors.border}`,
+    transition: `background ${transition.normal}`,
     display: 'inline-block',
     ...(typeof local.style === 'object' ? local.style : {}),
   })
@@ -49,7 +50,7 @@ export const Switch: Component<SwitchProps> = (props) => {
     position: 'absolute',
     top: `${THUMB_OFFSET}px`,
     left: isChecked() ? `${TRACK_WIDTH - THUMB_SIZE - THUMB_OFFSET}px` : `${THUMB_OFFSET}px`,
-    transition: 'left 0.2s ease',
+    transition: `left ${transition.normal}`,
   })
 
   return (

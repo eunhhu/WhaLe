@@ -5,7 +5,7 @@ import pc from 'picocolors'
 import { loadConfig } from '../config-loader.js'
 import { generateHtmlEntries } from '../generators/html-entry.js'
 import { generateViteConfig } from '../generators/vite-config.js'
-import { generateTauriConf } from '../generators/tauri-conf.js'
+import { generateTauriConf, resolveBundleIcon } from '../generators/tauri-conf.js'
 import type { WhaleConfig } from '../config.js'
 import { resolveRuntimeOptions, type RuntimeOptions } from '../runtime-options.js'
 
@@ -48,6 +48,29 @@ function ensureTauriProject(
     throw new Error('Failed to initialize Tauri project')
   }
   console.log(pc.green('[whale]'), 'Tauri project initialized')
+}
+
+function syncTauriIcons(projectRoot: string, config: WhaleConfig): void {
+  const srcTauri = join(projectRoot, 'src-tauri')
+  const bundleIcon = resolveBundleIcon(config, projectRoot)
+  if (!bundleIcon) return
+
+  const iconSourceAbsPath = resolve(srcTauri, bundleIcon)
+  if (!existsSync(iconSourceAbsPath)) return
+
+  console.log(pc.dim('  Syncing Tauri icons from source icon...'))
+  const result = spawnSync(
+    NPX_BIN,
+    ['tauri', 'icon', iconSourceAbsPath, '--output', join(srcTauri, 'icons')],
+    {
+      cwd: projectRoot,
+      stdio: 'inherit',
+    },
+  )
+
+  if (result.status !== 0) {
+    throw new Error(`Failed to generate Tauri icons from: ${iconSourceAbsPath}`)
+  }
 }
 
 export async function build(configPath: string): Promise<void> {
@@ -106,7 +129,10 @@ export async function build(configPath: string): Promise<void> {
     // 5. Ensure src-tauri exists (auto-init if missing)
     ensureTauriProject(projectRoot, config, runtime)
 
-    // 6. Run tauri build
+    // 6. Keep platform icons aligned with app.icon/assets icon source.
+    syncTauriIcons(projectRoot, config)
+
+    // 7. Run tauri build
     console.log(pc.cyan('[whale]'), 'Building Tauri application...')
     const tauriProcess = spawn(
       NPX_BIN,

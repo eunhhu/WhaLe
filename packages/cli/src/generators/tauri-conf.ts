@@ -51,7 +51,7 @@ function toPosixPath(path: string): string {
   return path.replace(/\\/g, '/')
 }
 
-function resolveBundleIcon(config: WhaleConfig, projectRoot: string): string | undefined {
+export function resolveBundleIcon(config: WhaleConfig, projectRoot: string): string | undefined {
   const srcTauriRoot = join(projectRoot, 'src-tauri')
   const configuredIcon = config.app.icon
   if (configuredIcon) {

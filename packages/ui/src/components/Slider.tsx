@@ -1,5 +1,5 @@
 import { Component, JSX, splitProps, mergeProps } from 'solid-js'
-import { colors, radius, font } from '../theme/tokens'
+import { colors, radius, font, transition } from '../theme/tokens'
 
 export interface SliderProps {
   min?: number
@@ -31,17 +31,18 @@ export const Slider: Component<SliderProps> = (props) => {
     appearance: 'none',
     width: '100%',
     height: '6px',
-    background: colors.primary,
+    background: colors.border,
     'border-radius': radius.sm,
     outline: 'none',
     cursor: local.disabled ? 'not-allowed' : 'pointer',
     opacity: local.disabled ? '0.5' : '1',
     'accent-color': colors.accent,
+    transition: `opacity ${transition.fast}`,
   }
 
   const labelStyle: JSX.CSSProperties = {
     color: colors.dim,
-    'font-family': font.family,
+    'font-family': font.mono,
     'font-size': font.size.sm,
     'min-width': '32px',
     'text-align': 'right',

@@ -2,8 +2,8 @@ import { Component, JSX, splitProps, mergeProps } from 'solid-js'
 import { Dynamic } from 'solid-js/web'
 import { colors, font } from '../theme/tokens'
 
-export type TextSize = 'sm' | 'md' | 'lg'
-export type TextWeight = 'normal' | 'medium' | 'bold'
+export type TextSize = 'xs' | 'sm' | 'md' | 'lg' | 'xl' | '2xl'
+export type TextWeight = 'normal' | 'medium' | 'semibold' | 'bold'
 
 export interface TextProps {
   size?: TextSize
@@ -13,12 +13,6 @@ export interface TextProps {
   class?: string
   style?: JSX.CSSProperties
   children?: JSX.Element
-}
-
-const weightMap: Record<TextWeight, string> = {
-  normal: '400',
-  medium: '500',
-  bold: '700',
 }
 
 export const Text: Component<TextProps> = (props) => {
@@ -32,7 +26,7 @@ export const Text: Component<TextProps> = (props) => {
     'font-family': font.family,
     'font-size': font.size[local.size],
     color: local.color,
-    'font-weight': weightMap[local.weight],
+    'font-weight': font.weight[local.weight],
     ...(typeof local.style === 'object' ? local.style : {}),
   })
 

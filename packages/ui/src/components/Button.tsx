@@ -1,5 +1,5 @@
 import { Component, JSX, splitProps, mergeProps } from 'solid-js'
-import { colors, radius, font, spacing } from '../theme/tokens'
+import { colors, radius, font, spacing, transition, shadow } from '../theme/tokens'
 
 export type ButtonVariant = 'primary' | 'accent' | 'ghost' | 'danger'
 export type ButtonSize = 'sm' | 'md' | 'lg'
@@ -23,7 +23,7 @@ const variantStyles: Record<ButtonVariant, JSX.CSSProperties> = {
   ghost: {
     background: 'transparent',
     color: colors.dim,
-    border: `1px solid ${colors.dim}`,
+    border: `1px solid ${colors.border}`,
   },
   danger: {
     background: colors.error,
@@ -49,15 +49,19 @@ const sizeStyles: Record<ButtonSize, JSX.CSSProperties> = {
 
 export const Button: Component<ButtonProps> = (props) => {
   const merged = mergeProps({ variant: 'primary' as ButtonVariant, size: 'md' as ButtonSize }, props)
-  const [local, rest] = splitProps(merged, ['variant', 'size', 'style', 'children'])
+  const [local, rest] = splitProps(merged, ['variant', 'size', 'style', 'children', 'disabled'])
 
   const baseStyle: JSX.CSSProperties = {
     'font-family': font.family,
     'border-radius': radius.md,
     cursor: 'pointer',
-    'font-weight': '500',
-    transition: 'opacity 0.15s ease',
+    'font-weight': font.weight.medium,
+    transition: `opacity ${transition.fast}`,
   }
+
+  const disabledStyle: JSX.CSSProperties = local.disabled
+    ? { opacity: '0.5', cursor: 'not-allowed', 'pointer-events': 'none' }
+    : {}
 
   return (
     <button
@@ -65,8 +69,10 @@ export const Button: Component<ButtonProps> = (props) => {
         ...baseStyle,
         ...variantStyles[local.variant],
         ...sizeStyles[local.size],
+        ...disabledStyle,
         ...(typeof local.style === 'object' ? local.style : {}),
       }}
+      disabled={local.disabled}
       {...rest}
     >
       {local.children}
