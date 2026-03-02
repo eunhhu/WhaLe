@@ -5,6 +5,7 @@ import { globalResetStyles } from '../theme/global-styles'
 
 export interface ThemeProviderProps {
   theme?: WhaleTheme
+  transparent?: boolean
   children: JSX.Element
 }
 
@@ -18,10 +19,32 @@ export const ThemeProvider: Component<ThemeProviderProps> = (props) => {
       document.head.appendChild(styleEl)
     }
     styleEl.textContent = globalResetStyles
+
+    if (props.transparent) {
+      document.documentElement.setAttribute('data-transparent', 'true')
+      document.body.setAttribute('data-transparent', 'true')
+      document.documentElement.style.setProperty('background', 'transparent', 'important')
+      document.documentElement.style.setProperty('background-color', 'transparent', 'important')
+      document.body.style.setProperty('background', 'transparent', 'important')
+      document.body.style.setProperty('background-color', 'transparent', 'important')
+    } else {
+      document.documentElement.removeAttribute('data-transparent')
+      document.body.removeAttribute('data-transparent')
+      document.documentElement.style.removeProperty('background')
+      document.documentElement.style.removeProperty('background-color')
+      document.body.style.removeProperty('background')
+      document.body.style.removeProperty('background-color')
+    }
   })
 
   onCleanup(() => {
     styleEl?.remove()
+    document.documentElement.removeAttribute('data-transparent')
+    document.body.removeAttribute('data-transparent')
+    document.documentElement.style.removeProperty('background')
+    document.documentElement.style.removeProperty('background-color')
+    document.body.style.removeProperty('background')
+    document.body.style.removeProperty('background-color')
   })
 
   const theme = () => props.theme ?? darkTheme
@@ -36,13 +59,13 @@ export const ThemeProvider: Component<ThemeProviderProps> = (props) => {
       ...vars,
       width: '100%',
       height: '100%',
-      background: 'var(--whale-bg)',
+      background: props.transparent ? 'transparent' : 'var(--whale-bg)',
       color: 'var(--whale-text)',
     } as JSX.CSSProperties
   }
 
   return (
-    <div style={style()}>
+    <div data-whale-theme-root="" style={style()}>
       {props.children}
     </div>
   )

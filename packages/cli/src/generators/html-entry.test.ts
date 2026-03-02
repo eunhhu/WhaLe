@@ -67,4 +67,38 @@ describe('generateHtmlEntries', () => {
     expect(html).toContain('<script type="module" src="./__whale_entry_main.ts"></script>')
     expect(bootstrap).toContain('import * as WindowModule from "../../src/ui/windows/main.tsx"')
   })
+
+  it('uses window title from config in generated html title', () => {
+    const root = createProjectRoot()
+    const titledConfig: WhaleConfig = {
+      ...config,
+      windows: {
+        main: {
+          entry: './src/ui/windows/main.tsx',
+          title: 'Control Center',
+        },
+      },
+    }
+    generateHtmlEntries(titledConfig, root, 'development')
+
+    const html = readFileSync(join(root, '.whale', 'main.html'), 'utf-8')
+    expect(html).toContain('<title>Test App - Control Center</title>')
+  })
+
+  it('injects transparent bootstrap styles for transparent windows', () => {
+    const root = createProjectRoot()
+    const transparentConfig: WhaleConfig = {
+      ...config,
+      windows: {
+        main: {
+          entry: './src/ui/windows/main.tsx',
+          transparent: true,
+        },
+      },
+    }
+    generateHtmlEntries(transparentConfig, root, 'development')
+
+    const html = readFileSync(join(root, '.whale', 'main.html'), 'utf-8')
+    expect(html).toContain('background: transparent !important;')
+  })
 })

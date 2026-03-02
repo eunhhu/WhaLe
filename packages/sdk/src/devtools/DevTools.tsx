@@ -33,10 +33,18 @@ const DevTools: Component = () => {
         ))}
       </div>
       <div style={s.panel}>
-        {activeTab() === 'console' && <Console />}
-        {activeTab() === 'store' && <StoreInspector />}
-        {activeTab() === 'input' && <InputMonitor />}
-        {activeTab() === 'events' && <EventsPanel />}
+        <div style={{ display: activeTab() === 'console' ? 'block' : 'none', height: '100%' }}>
+          <Console />
+        </div>
+        <div style={{ display: activeTab() === 'store' ? 'block' : 'none', height: '100%' }}>
+          <StoreInspector />
+        </div>
+        <div style={{ display: activeTab() === 'input' ? 'block' : 'none', height: '100%' }}>
+          <InputMonitor />
+        </div>
+        <div style={{ display: activeTab() === 'events' ? 'block' : 'none', height: '100%' }}>
+          <EventsPanel />
+        </div>
       </div>
     </div>
   )

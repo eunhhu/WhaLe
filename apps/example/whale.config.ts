@@ -10,12 +10,14 @@ export default defineConfig({
   windows: {
     main: {
       entry: './src/ui/windows/main.tsx',
+      title: 'Example Trainer',
       width: 400,
       height: 500,
       resizable: false,
     },
     overlay: {
       entry: './src/ui/windows/overlay.tsx',
+      title: 'Overlay',
       width: 300,
       height: 200,
       transparent: true,
@@ -25,6 +27,7 @@ export default defineConfig({
     },
     settings: {
       entry: './src/ui/windows/settings.tsx',
+      title: 'Settings',
       width: 500,
       height: 400,
       visible: false,
@@ -32,7 +35,7 @@ export default defineConfig({
   },
   frida: {
     scripts: [
-      { entry: './src/script/hooks/main.ts', store: 'trainer' },
+      { entry: './src/script/main.ts', store: 'trainer' },
     ],
   },
   store: {

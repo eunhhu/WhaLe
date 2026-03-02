@@ -20,6 +20,7 @@ export interface WindowConfig {
   alwaysOnTop?: boolean
   transparent?: boolean
   decorations?: boolean
+  shadow?: boolean
   skipTaskbar?: boolean
   visible?: boolean
   position?: { x: number; y: number } | string

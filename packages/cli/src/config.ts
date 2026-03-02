@@ -1,11 +1,13 @@
 export interface WindowConfig {
   entry: string
+  title?: string
   width?: number
   height?: number
   resizable?: boolean
   alwaysOnTop?: boolean
   transparent?: boolean
   decorations?: boolean
+  shadow?: boolean
   skipTaskbar?: boolean
   visible?: boolean
   position?: { x: number; y: number } | string

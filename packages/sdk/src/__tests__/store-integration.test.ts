@@ -51,6 +51,55 @@ describe('createSyncStore integration', () => {
     })
   })
 
+  it('should hydrate local store from store_get_all snapshot on creation', async () => {
+    mockInvoke.mockImplementation((command: string) => {
+      if (command === 'store_get_all') {
+        return Promise.resolve({ hp: 250, mp: 10 })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    const { createSyncStore } = await import('../store')
+    const store = createSyncStore('player', { hp: 100, mp: 50 })
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(mockInvoke).toHaveBeenCalledWith('store_get_all', { name: 'player' })
+    expect(store.hp).toBe(250)
+    expect(store.mp).toBe(10)
+  })
+
+  it('should not overwrite local updates with a late hydration snapshot', async () => {
+    let resolveSnapshot: ((value: { hp: number }) => void) | undefined
+    const snapshotPromise = new Promise<{ hp: number }>((resolve) => {
+      resolveSnapshot = resolve
+    })
+
+    mockInvoke.mockImplementation((command: string) => {
+      if (command === 'store_get_all') {
+        return snapshotPromise
+      }
+      return Promise.resolve(undefined)
+    })
+
+    const { createSyncStore } = await import('../store')
+    const store = createSyncStore('player', { hp: 100 })
+
+    store.setHp(999)
+    resolveSnapshot?.({ hp: 250 })
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(store.hp).toBe(999)
+    expect(mockInvoke).toHaveBeenCalledWith('store_set', {
+      name: 'player',
+      key: 'hp',
+      value: 999,
+    })
+  })
+
   it('should update local store AND call store_set invoke on setXxx', async () => {
     const { createSyncStore } = await import('../store')
 

@@ -18,19 +18,19 @@ pub fn parse_whale_message(message: &Value) -> Option<(String, HashMap<String, V
     Some((store_name, patch_map))
 }
 
-fn env_flag_enabled(name: &str) -> bool {
+fn env_flag_enabled(name: &str, default_enabled: bool) -> bool {
     match std::env::var(name) {
         Ok(v) => !matches!(
             v.to_ascii_lowercase().as_str(),
             "0" | "false" | "no" | "off"
         ),
-        Err(_) => true,
+        Err(_) => default_enabled,
     }
 }
 
 fn devtools_frida_log_stream_enabled() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();
-    *ENABLED.get_or_init(|| env_flag_enabled("WHALE_DEVTOOLS_FRIDA_LOG"))
+    *ENABLED.get_or_init(|| env_flag_enabled("WHALE_DEVTOOLS_FRIDA_LOG", false))
 }
 
 /// Frida 스크립트에서 send()된 메시지를 처리

@@ -6,12 +6,15 @@ import { resolveRuntimeOptions } from '../runtime-options.js'
 export interface TauriWindowConf {
   label: string
   url: string
+  title?: string
   width?: number
   height?: number
   resizable?: boolean
   alwaysOnTop?: boolean
   transparent?: boolean
   decorations?: boolean
+  shadow?: boolean
+  backgroundColor?: string
   skipTaskbar?: boolean
   visible?: boolean
   x?: number
@@ -29,6 +32,7 @@ export interface TauriConf {
     beforeBuildCommand: string
   }
   app: {
+    macOSPrivateApi?: boolean
     withGlobalTauri: boolean
     windows: TauriWindowConf[]
   }
@@ -88,19 +92,24 @@ function mapWindowPosition(
 
 function toTauriWindow(
   label: string,
+  appName: string,
   config: WhaleConfig['windows'][string],
 ): TauriWindowConf {
   const pos = mapWindowPosition(config.position)
+  const title = config.title ?? appName
 
   return {
     label,
     url: `${label}.html`,
+    title,
     ...(config.width !== undefined && { width: config.width }),
     ...(config.height !== undefined && { height: config.height }),
     ...(config.resizable !== undefined && { resizable: config.resizable }),
     ...(config.alwaysOnTop !== undefined && { alwaysOnTop: config.alwaysOnTop }),
     ...(config.transparent !== undefined && { transparent: config.transparent }),
     ...(config.decorations !== undefined && { decorations: config.decorations }),
+    ...(config.shadow !== undefined ? { shadow: config.shadow } : config.transparent ? { shadow: false } : {}),
+    backgroundColor: config.transparent ? '#00000000' : '#0f0f17',
     ...(config.skipTaskbar !== undefined && { skipTaskbar: config.skipTaskbar }),
     ...(config.visible !== undefined && { visible: config.visible }),
     ...(pos.x !== undefined && { x: pos.x }),
@@ -115,18 +124,21 @@ export function generateTauriConf(
 ): TauriConf {
   const runtime = resolveRuntimeOptions(config, projectRoot)
   const windows = Object.entries(config.windows).map(([label, wc]) =>
-    toTauriWindow(label, wc),
+    toTauriWindow(label, config.app.name, wc),
   )
+  const hasTransparentWindow = windows.some((window) => window.transparent === true)
 
   // Auto-inject devtools window in development mode
   if (mode === 'development') {
     windows.push({
       label: '__devtools__',
       url: '__devtools__.html',
+      title: `${config.app.name} - DevTools`,
       width: 900,
       height: 600,
       resizable: true,
       decorations: true,
+      backgroundColor: '#0f0f17',
       visible: false,
     })
   }
@@ -152,6 +164,7 @@ export function generateTauriConf(
     identifier: config.app.identifier,
     build: buildConf,
     app: {
+      ...(hasTransparentWindow ? { macOSPrivateApi: true } : {}),
       withGlobalTauri: true,
       windows,
     },

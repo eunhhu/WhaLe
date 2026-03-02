@@ -5,6 +5,7 @@ use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 pub struct WindowCreateConfig {
     pub id: String,
     pub url: String,
+    pub title: Option<String>,
     pub width: Option<f64>,
     pub height: Option<f64>,
     pub transparent: Option<bool>,
@@ -23,12 +24,63 @@ fn emit_visibility(app: &AppHandle, id: &str, visible: bool) {
     );
 }
 
+#[cfg(target_os = "macos")]
+fn apply_macos_window_background(window: &tauri::WebviewWindow, transparent: bool) {
+    let _ = window.with_webview(move |webview| unsafe {
+        use objc2_app_kit::NSColor;
+        use objc2_foundation::{NSString, NSObjectNSKeyValueCoding};
+
+        let ns_win: &objc2_app_kit::NSWindow = &*webview.ns_window().cast();
+        let wv: &objc2_web_kit::WKWebView = &*webview.inner().cast();
+        let key = NSString::from_str("drawsBackground");
+        let no = objc2_foundation::NSNumber::new_bool(false);
+        wv.setValue_forKey(Some(&no), &key);
+
+        if transparent {
+            ns_win.setTitlebarAppearsTransparent(true);
+            ns_win.setBackgroundColor(Some(&NSColor::clearColor()));
+        } else {
+            let bg = NSColor::colorWithSRGBRed_green_blue_alpha(
+                15.0 / 255.0, 15.0 / 255.0, 23.0 / 255.0, 1.0,
+            );
+            ns_win.setBackgroundColor(Some(&bg));
+        }
+    });
+}
+
+fn create_window_from_config(app: &AppHandle, id: &str) -> Result<tauri::WebviewWindow, String> {
+    let config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|w| w.label == id)
+        .ok_or_else(|| format!("Window '{}' not found in config", id))?;
+    let transparent = config.transparent;
+
+    let window = WebviewWindowBuilder::from_config(app, config)
+        .map_err(|e| e.to_string())?
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    #[cfg(target_os = "macos")]
+    apply_macos_window_background(&window, transparent);
+
+    Ok(window)
+}
+
+fn get_or_create_window(app: &AppHandle, id: &str) -> Result<tauri::WebviewWindow, String> {
+    if let Some(window) = app.get_webview_window(id) {
+        return Ok(window);
+    }
+    create_window_from_config(app, id)
+}
+
 #[tauri::command]
 pub fn window_show(app: AppHandle, id: String) -> Result<(), String> {
-    let window = app
-        .get_webview_window(&id)
-        .ok_or_else(|| format!("Window '{}' not found", id))?;
+    let window = get_or_create_window(&app, &id)?;
     window.show().map_err(|e| e.to_string())?;
+    let _ = window.set_focus();
     emit_visibility(&app, &id, true);
     Ok(())
 }
@@ -45,18 +97,26 @@ pub fn window_hide(app: AppHandle, id: String) -> Result<(), String> {
 
 #[tauri::command]
 pub fn window_toggle(app: AppHandle, id: String) -> Result<(), String> {
-    let window = app
-        .get_webview_window(&id)
-        .ok_or_else(|| format!("Window '{}' not found", id))?;
-    let visible = window.is_visible().map_err(|e| e.to_string())?;
-    if visible {
-        window.hide().map_err(|e| e.to_string())?;
-        emit_visibility(&app, &id, false);
-        Ok(())
-    } else {
-        window.show().map_err(|e| e.to_string())?;
-        emit_visibility(&app, &id, true);
-        Ok(())
+    match app.get_webview_window(&id) {
+        Some(window) => {
+            let visible = window.is_visible().map_err(|e| e.to_string())?;
+            if visible {
+                window.hide().map_err(|e| e.to_string())?;
+                emit_visibility(&app, &id, false);
+            } else {
+                window.show().map_err(|e| e.to_string())?;
+                let _ = window.set_focus();
+                emit_visibility(&app, &id, true);
+            }
+            Ok(())
+        }
+        None => {
+            let window = create_window_from_config(&app, &id)?;
+            window.show().map_err(|e| e.to_string())?;
+            let _ = window.set_focus();
+            emit_visibility(&app, &id, true);
+            Ok(())
+        }
     }
 }
 
@@ -81,12 +141,7 @@ pub fn window_set_position(app: AppHandle, id: String, x: f64, y: f64) -> Result
 }
 
 #[tauri::command]
-pub fn window_set_size(
-    app: AppHandle,
-    id: String,
-    width: f64,
-    height: f64,
-) -> Result<(), String> {
+pub fn window_set_size(app: AppHandle, id: String, width: f64, height: f64) -> Result<(), String> {
     let window = app
         .get_webview_window(&id)
         .ok_or_else(|| format!("Window '{}' not found", id))?;
@@ -96,11 +151,7 @@ pub fn window_set_size(
 }
 
 #[tauri::command]
-pub fn window_set_always_on_top(
-    app: AppHandle,
-    id: String,
-    value: bool,
-) -> Result<(), String> {
+pub fn window_set_always_on_top(app: AppHandle, id: String, value: bool) -> Result<(), String> {
     let window = app
         .get_webview_window(&id)
         .ok_or_else(|| format!("Window '{}' not found", id))?;
@@ -134,8 +185,23 @@ pub fn window_create(app: AppHandle, config: WindowCreateConfig) -> Result<(), S
         }
     }
 
+    if let Some(title) = config.title {
+        builder = builder.title(title);
+    }
+
     if let Some(decorations) = config.decorations {
         builder = builder.decorations(decorations);
+    }
+
+    if let Some(transparent) = config.transparent {
+        #[cfg(not(target_os = "macos"))]
+        {
+            builder = builder.transparent(transparent);
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let _ = transparent;
+        }
     }
 
     if let Some(always_on_top) = config.always_on_top {
@@ -154,7 +220,11 @@ pub fn window_create(app: AppHandle, config: WindowCreateConfig) -> Result<(), S
         builder = builder.position(x, y);
     }
 
-    builder.build().map_err(|e| e.to_string())?;
+    let window = builder.build().map_err(|e| e.to_string())?;
+
+    #[cfg(target_os = "macos")]
+    apply_macos_window_background(&window, config.transparent.unwrap_or(false));
+
     emit_visibility(&app, &config.id, config.visible.unwrap_or(true));
 
     Ok(())

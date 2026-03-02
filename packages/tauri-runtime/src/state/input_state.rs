@@ -116,19 +116,19 @@ impl InputManager {
     }
 }
 
-fn env_flag_enabled(name: &str) -> bool {
+fn env_flag_enabled(name: &str, default_enabled: bool) -> bool {
     match std::env::var(name) {
         Ok(v) => !matches!(
             v.to_ascii_lowercase().as_str(),
             "0" | "false" | "no" | "off"
         ),
-        Err(_) => true,
+        Err(_) => default_enabled,
     }
 }
 
 fn devtools_input_event_stream_enabled() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();
-    *ENABLED.get_or_init(|| env_flag_enabled("WHALE_DEVTOOLS_INPUT_STREAM"))
+    *ENABLED.get_or_init(|| env_flag_enabled("WHALE_DEVTOOLS_INPUT_STREAM", false))
 }
 
 fn apply_hotkey_event(

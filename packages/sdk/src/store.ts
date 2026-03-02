@@ -3,6 +3,7 @@ import { getOwner, onCleanup } from 'solid-js'
 import type { SyncStore } from './types'
 import {
   getCurrentWindowLabel,
+  safeInvoke,
   safeInvokeVoid,
   safeListen,
 } from './tauri'
@@ -28,6 +29,13 @@ export function createSyncStore<T extends StoreRecord>(
   defaults: T,
 ): SyncStore<T> {
   const [store, setStore] = createStore<T>({ ...defaults })
+  const hydrationTouchedKeys = new Set<StoreKey<T>>()
+  let hydrationPending = true
+
+  const markHydrationTouched = (key: StoreKey<T>) => {
+    if (!hydrationPending) return
+    hydrationTouchedKeys.add(key)
+  }
 
   // Rust에 store 등록
   safeInvokeVoid('store_register', { name, defaults })
@@ -39,6 +47,23 @@ export function createSyncStore<T extends StoreRecord>(
     safeInvokeVoid('store_subscribe', { name, window: windowLabel, keys })
   }
 
+  // 초기 로드 시 Rust 쪽 현재 상태(복원된 persist 포함)를 반영해 UI와 동기화한다.
+  void safeInvoke<Partial<T>>('store_get_all', { name }).then((snapshot) => {
+    if (!snapshot) return
+    setStore(
+      produce((s: T) => {
+        for (const [key, value] of Object.entries(snapshot)) {
+          if (!isStoreKey(defaults, key)) continue
+          if (hydrationTouchedKeys.has(key)) continue
+          s[key] = value as T[typeof key]
+        }
+      }),
+    )
+  }).finally(() => {
+    hydrationPending = false
+    hydrationTouchedKeys.clear()
+  })
+
   // Tauri 이벤트 수신 — 다른 윈도우 또는 Frida에서 변경된 값 반영
   const unlisten = safeListen<{ store: string; patch: Partial<T> }>(
     'store:changed',
@@ -48,7 +73,8 @@ export function createSyncStore<T extends StoreRecord>(
         produce((s: T) => {
           for (const [key, value] of Object.entries(event.payload.patch)) {
             if (!isStoreKey(defaults, key)) continue
-            s[key] = value as T[StoreKey<T>]
+            markHydrationTouched(key)
+            s[key] = value as T[typeof key]
           }
         }),
       )
@@ -77,6 +103,7 @@ export function createSyncStore<T extends StoreRecord>(
       if (field) {
         return (value: T[typeof field]) => {
           if (Object.is(target[field], value)) return
+          markHydrationTouched(field)
           setStore(
             produce((s: T) => {
               s[field] = value

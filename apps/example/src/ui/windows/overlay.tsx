@@ -6,7 +6,7 @@ export default function Overlay() {
   const win = useCurrentWindow()
 
   return (
-    <ThemeProvider>
+    <ThemeProvider transparent>
       <Card variant="elevated" padding={3} style={{ 'max-width': '200px' }}>
         <Flex direction="column" gap={2}>
           <Flex justify="space-between" align="center">

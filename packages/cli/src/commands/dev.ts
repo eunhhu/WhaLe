@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve, join } from 'node:path'
 import pc from 'picocolors'
 import { loadConfig } from '../config-loader.js'
@@ -70,6 +70,56 @@ function syncTauriIcons(projectRoot: string, config: WhaleConfig): void {
 
   if (result.status !== 0) {
     throw new Error(`Failed to generate Tauri icons from: ${iconSourceAbsPath}`)
+  }
+}
+
+function syncTauriCapabilities(projectRoot: string, config: WhaleConfig, mode: 'development' | 'production'): void {
+  const capabilitiesDir = join(projectRoot, 'src-tauri', 'capabilities')
+  const defaultCapabilityPath = join(capabilitiesDir, 'default.json')
+  const desiredWindows = [
+    ...Object.keys(config.windows),
+    ...(mode === 'development' ? ['__devtools__'] : []),
+  ]
+
+  if (!existsSync(defaultCapabilityPath)) {
+    mkdirSync(capabilitiesDir, { recursive: true })
+    const defaultCapability = {
+      $schema: '../gen/schemas/desktop-schema.json',
+      identifier: 'default',
+      description: 'enables the default permissions',
+      windows: desiredWindows,
+      permissions: ['core:default'],
+    }
+    writeFileSync(defaultCapabilityPath, `${JSON.stringify(defaultCapability, null, 2)}\n`, 'utf-8')
+    console.log(pc.dim('  Generated default capability with synced windows'))
+    return
+  }
+
+  let changed = false
+  let capability: Record<string, unknown>
+  try {
+    capability = JSON.parse(readFileSync(defaultCapabilityPath, 'utf-8')) as Record<string, unknown>
+  } catch {
+    capability = {
+      $schema: '../gen/schemas/desktop-schema.json',
+      identifier: 'default',
+      description: 'enables the default permissions',
+      permissions: ['core:default'],
+    }
+    changed = true
+  }
+
+  const currentWindows = Array.isArray(capability.windows) ? capability.windows : []
+  const sameLength = currentWindows.length === desiredWindows.length
+  const sameOrder = sameLength && currentWindows.every((w, i) => w === desiredWindows[i])
+  if (!sameOrder) {
+    capability.windows = desiredWindows
+    changed = true
+  }
+
+  if (changed) {
+    writeFileSync(defaultCapabilityPath, `${JSON.stringify(capability, null, 2)}\n`, 'utf-8')
+    console.log(pc.dim(`  Synced capability windows: ${desiredWindows.join(', ')}`))
   }
 }
 
@@ -144,10 +194,13 @@ export async function dev(configPath: string): Promise<void> {
     // 5. Ensure src-tauri exists (auto-init if missing)
     ensureTauriProject(projectRoot, config, runtime)
 
-    // 6. Keep platform icons aligned with app.icon/assets icon source.
+    // 6. Keep Tauri window capability labels in sync with whale.config windows.
+    syncTauriCapabilities(projectRoot, config, 'development')
+
+    // 7. Keep platform icons aligned with app.icon/assets icon source.
     syncTauriIcons(projectRoot, config)
 
-    // 7. Start tauri dev
+    // 8. Start tauri dev
     console.log(pc.cyan('[whale]'), 'Starting Tauri...')
     const tauriProcess = spawn(
       NPX_BIN,

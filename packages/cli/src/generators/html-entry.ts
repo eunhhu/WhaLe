@@ -37,6 +37,20 @@ export function generateHtmlEntries(
         : productionModuleImportPath
     const bootstrapFileName = toBootstrapFileName(label)
     const bootstrapPath = join(outDirAbs, bootstrapFileName)
+    const pageTitle = windowConfig.title
+      ? `${config.app.name} - ${windowConfig.title}`
+      : `${config.app.name} - ${label}`
+    const bootstrapBackgroundStyle = windowConfig.transparent
+      ? `<style>
+  html, body, #root {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    background: transparent !important;
+  }
+</style>`
+      : ''
     const bootstrap = `import { createComponent } from 'solid-js'
 import { render } from 'solid-js/web'
 import * as WindowModule from ${JSON.stringify(moduleImportPath)}
@@ -73,7 +87,8 @@ if (import.meta.hot) {
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" href="data:," />
-  <title>${config.app.name} - ${label}</title>
+  <title>${pageTitle}</title>
+  ${bootstrapBackgroundStyle}
 </head>
 <body>
   <div id="root"></div>

@@ -76,6 +76,7 @@ export default defineConfig({
   windows: {
     main: {
       entry: './src/ui/windows/main.tsx',
+      title: 'Main',
       width: 800,
       height: 600,
       resizable: true,
@@ -84,6 +85,7 @@ export default defineConfig({
     },
     overlay: {
       entry: './src/ui/windows/overlay.tsx',
+      title: 'Overlay',
       width: 400,
       height: 300,
       transparent: true,
@@ -93,6 +95,7 @@ export default defineConfig({
     },
     settings: {
       entry: './src/ui/windows/settings.tsx',
+      title: 'Settings',
       width: 600,
       height: 500,
       resizable: false,

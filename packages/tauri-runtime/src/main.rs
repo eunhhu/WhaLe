@@ -84,6 +84,43 @@ pub fn run() {
       let input_manager = app.state::<InputManager>();
       input_manager.start_listener(app.handle().clone());
 
+      // macOS: set webview/window background to prevent white flash on resize and enable transparency
+      #[cfg(target_os = "macos")]
+      {
+          for (label, window) in app.webview_windows() {
+              let is_transparent = app
+                  .config()
+                  .app
+                  .windows
+                  .iter()
+                  .find(|w| w.label == label)
+                  .map(|w| w.transparent)
+                  .unwrap_or(false);
+
+              let _ = window.with_webview(move |webview| unsafe {
+                  use objc2_app_kit::NSColor;
+                  use objc2_foundation::{NSString, NSObjectNSKeyValueCoding};
+
+                  let ns_win: &objc2_app_kit::NSWindow = &*webview.ns_window().cast();
+                  let wv: &objc2_web_kit::WKWebView = &*webview.inner().cast();
+                  let key = NSString::from_str("drawsBackground");
+                  let no = objc2_foundation::NSNumber::new_bool(false);
+                  wv.setValue_forKey(Some(&no), &key);
+
+                  if is_transparent {
+                      ns_win.setTitlebarAppearsTransparent(true);
+                      ns_win.setBackgroundColor(Some(&NSColor::clearColor()));
+                  } else {
+                      // Match --whale-bg (#0f0f17) to hide native frame gap
+                      let bg = NSColor::colorWithSRGBRed_green_blue_alpha(
+                          15.0 / 255.0, 15.0 / 255.0, 23.0 / 255.0, 1.0,
+                      );
+                      ns_win.setBackgroundColor(Some(&bg));
+                  }
+              });
+          }
+      }
+
       // DevTools: register F12 toggle hotkey in debug mode
       if cfg!(debug_assertions) {
           input_manager.register_hotkey("__devtools_toggle__", vec!["f12".to_string()]);
@@ -94,14 +131,11 @@ pub fn run() {
                   if payload.get("id").and_then(|v| v.as_str()) == Some("__devtools_toggle__")
                       && payload.get("phase").and_then(|v| v.as_str()) == Some("press")
                   {
-                      if let Some(win) = app_handle.get_webview_window("__devtools__") {
-                          let visible = win.is_visible().unwrap_or(false);
-                          if visible {
-                              let _ = win.hide();
-                          } else {
-                              let _ = win.show();
-                              let _ = win.set_focus();
-                          }
+                      if let Err(err) = commands::window_cmd::window_toggle(
+                          app_handle.clone(),
+                          "__devtools__".to_string(),
+                      ) {
+                          log::warn!("[whale:window] failed to toggle __devtools__: {}", err);
                       }
                   }
               }

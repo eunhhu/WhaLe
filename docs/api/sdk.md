@@ -1,173 +1,75 @@
-# WhaLe SDK API Reference
+# @whale/sdk API
 
-The WhaLe SDK (`@whale/sdk`) provides SolidJS primitives for building overlay windows, managing Frida sessions, and controlling input simulation within the WhaLe framework.
+이 문서는 현재 코드베이스(`packages/sdk/src`) 기준의 실제 공개 API를 정리합니다.
 
----
-
-## Installation
+## 설치/사용
 
 ```ts
-import { createSyncStore, useWindow, useHotkey } from '@whale/sdk'
+import {
+  createSyncStore,
+  useHotkey,
+  useWindow,
+  useCurrentWindow,
+  useSimulate,
+  useDevices,
+  useDevice,
+  useSession,
+  isTauriRuntime,
+  safeInvoke,
+  safeInvokeVoid,
+  safeListen,
+} from '@whale/sdk'
 ```
-
----
 
 ## Store
 
-### `createSyncStore`
-
-Creates a reactive store that is synchronized across all windows via the Rust backend.
+### `createSyncStore<T>(name, defaults)`
 
 ```ts
-function createSyncStore<T extends Record<string, any>>(
+function createSyncStore<T extends Record<string, unknown>>(
   name: string,
   defaults: T,
 ): SyncStore<T>
 ```
 
-**Parameters**
+동작 요약:
 
-| Parameter  | Type     | Description                                      |
-|------------|----------|--------------------------------------------------|
-| `name`     | `string` | Unique store identifier shared across windows.   |
-| `defaults` | `T`      | Initial values. All keys are subscribed automatically. |
+- 생성 시 `store_register` 호출
+- 현재 window label이 있으면 `store_subscribe` 호출
+- 초기 hydrate용 `store_get_all` 호출
+- `store:changed` 이벤트 수신 시 로컬 store patch 반영
+- `setXxx(value)` 호출 시
+  - 로컬 상태 먼저 반영
+  - `store_set` IPC 호출
 
-**Returns** `SyncStore<T>` — a reactive proxy with getter properties and `setXxx` setter methods for each key.
+중요:
 
-**Notes**
+- `setXxx`는 `defaults`에 정의된 키만 생성됩니다.
+- 컴포넌트 컨텍스트에서 생성하면 cleanup 시 unsubscribe/unlisten 수행됩니다.
 
-- Mutations from any window or from Frida scripts are reflected reactively via the `store:changed` Tauri event.
-- Setters call `invoke('store_set', ...)` to propagate changes to the backend and all subscribers.
-- Cleanup (unsubscribe + event unlisten) is registered automatically when called inside a SolidJS component.
+## Hotkey
 
-**Example**
-
-```ts
-const store = createSyncStore('ui', { visible: true, opacity: 1.0 })
-
-// Read
-console.log(store.visible)   // true
-
-// Write (propagates to all windows)
-store.setVisible(false)
-store.setOpacity(0.5)
-```
-
----
-
-## Window Hooks
-
-### `useWindow`
-
-Returns a handle for controlling any named window managed by WhaLe.
-
-```ts
-function useWindow(id: string): WindowHandle
-```
-
-**Parameters**
-
-| Parameter | Type     | Description              |
-|-----------|----------|--------------------------|
-| `id`      | `string` | The target window label. |
-
-**Returns** `WindowHandle`
-
-```ts
-interface WindowHandle {
-  visible: Accessor<boolean>
-  show(): void
-  hide(): void
-  toggle(): void
-  close(): void
-  setPosition(x: number, y: number): void
-  setSize(w: number, h: number): void
-  setAlwaysOnTop(value: boolean): void
-  center(): void
-}
-```
-
-| Member            | Description                                              |
-|-------------------|----------------------------------------------------------|
-| `visible`         | Reactive signal tracking current visibility state.       |
-| `show()`          | Makes the window visible.                                |
-| `hide()`          | Hides the window.                                        |
-| `toggle()`        | Toggles visibility.                                      |
-| `close()`         | Closes and destroys the window.                          |
-| `setPosition(x, y)` | Moves the window to screen coordinates `(x, y)`.     |
-| `setSize(w, h)`   | Resizes the window to `(w, h)` pixels.                   |
-| `setAlwaysOnTop(value)` | Sets or clears always-on-top behavior.            |
-| `center()`        | Centers the window on screen.                            |
-
-**Notes**
-
-- Listens to the `window:visibility-changed` Tauri event to keep `visible` in sync.
-- The event listener is cleaned up automatically inside a SolidJS component.
-
-**Example**
-
-```ts
-const win = useWindow('overlay')
-
-win.show()
-win.setPosition(100, 200)
-win.setSize(800, 600)
-win.setAlwaysOnTop(true)
-
-createEffect(() => {
-  console.log('visible:', win.visible())
-})
-```
-
----
-
-### `useCurrentWindow`
-
-Returns a handle for the window in which the current script is running.
-
-```ts
-function useCurrentWindow(): CurrentWindowHandle
-```
-
-**Returns** `CurrentWindowHandle`
-
-```ts
-interface CurrentWindowHandle extends WindowHandle {
-  id: string
-}
-```
-
-`id` is the label of the current webview window as reported by Tauri. All other members are identical to `WindowHandle`.
-
-**Example**
-
-```ts
-const win = useCurrentWindow()
-
-console.log(win.id)  // e.g. "main"
-win.hide()
-```
-
----
-
-## Input Hooks
-
-### `useHotkey`
-
-Registers a global hotkey and returns a handle for managing it.
+### `useHotkey(keys, callback)`
 
 ```ts
 function useHotkey(keys: string[], callback: () => void): HotkeyHandle
 ```
 
-**Parameters**
+- 기존 단일 콜백 모드
+- 내부적으로 `onPress`에 매핑되어 **press 시점**에만 호출
 
-| Parameter  | Type         | Description                                            |
-|------------|--------------|--------------------------------------------------------|
-| `keys`     | `string[]`   | Key combination to register, e.g. `['CmdOrCtrl', 'Shift', 'H']`. |
-| `callback` | `() => void` | Function called when the hotkey fires while enabled.   |
+### `useHotkey(keys, { onPress, onRelease })`
 
-**Returns** `HotkeyHandle`
+```ts
+function useHotkey(
+  keys: string[],
+  callbacks: { onPress?: () => void; onRelease?: () => void },
+): HotkeyHandle
+```
+
+- `input:hotkey-triggered` 이벤트의 `phase`를 분기해서 호출
+
+### `HotkeyHandle`
 
 ```ts
 interface HotkeyHandle {
@@ -177,46 +79,52 @@ interface HotkeyHandle {
 }
 ```
 
-| Member         | Description                                                   |
-|----------------|---------------------------------------------------------------|
-| `enabled`      | Reactive signal. When `false`, `callback` is suppressed.      |
-| `setEnabled(value)` | Enables or disables the callback without unregistering.  |
-| `unregister()` | Removes the hotkey from the global registry.                  |
+- `enabled=false`면 이벤트를 무시하지만 등록은 유지
+- `unregister()`는 runtime 등록 해제 + listener cleanup
 
-**Notes**
+## Window
 
-- Each `useHotkey` call registers an independent hotkey with a unique internal ID.
-- Inside a SolidJS component, `unregister` is called automatically on cleanup.
-- Throws `HotkeyConflictError` if the key combination is already registered.
-
-**Example**
+### `useWindow(id)`
 
 ```ts
-const hk = useHotkey(['CmdOrCtrl', 'Shift', 'H'], () => {
-  win.toggle()
-})
-
-// Temporarily disable
-hk.setEnabled(false)
-
-// Manually remove
-hk.unregister()
+function useWindow(id: string): WindowHandle
 ```
 
----
-
-### `useSimulate`
-
-Returns a handle for simulating keyboard and mouse input at the OS level.
-
 ```ts
-function useSimulate(): SimulateHandle
+interface WindowHandle {
+  show(): void
+  hide(): void
+  toggle(): void
+  close(): void
+  visible: Accessor<boolean>
+  setPosition(x: number, y: number): void
+  setSize(w: number, h: number): void
+  setAlwaysOnTop(value: boolean): void
+  center(): void
+}
 ```
 
-**Returns** `SimulateHandle`
+- `window:visibility-changed` 이벤트를 구독해 `visible` 반영
+
+### `useCurrentWindow()`
 
 ```ts
-interface SimulateHandle {
+function useCurrentWindow(): CurrentWindowHandle
+
+interface CurrentWindowHandle extends WindowHandle {
+  id: string
+}
+```
+
+- 현재 webview label을 자동 사용
+- label 조회 실패 시 fallback은 `'main'`
+
+## Input Simulation
+
+### `useSimulate()`
+
+```ts
+function useSimulate(): {
   keyPress(key: string): void
   keyDown(key: string): void
   keyUp(key: string): void
@@ -225,226 +133,116 @@ interface SimulateHandle {
 }
 ```
 
-| Member              | Description                                                    |
-|---------------------|----------------------------------------------------------------|
-| `keyPress(key)`     | Synthesizes a full key press (down + up) for `key`.            |
-| `keyDown(key)`      | Sends a key-down event for `key`.                              |
-| `keyUp(key)`        | Sends a key-up event for `key`.                                |
-| `mouseClick(x, y)`  | Clicks the mouse at screen coordinates `(x, y)`.              |
-| `mouseMove(x, y)`   | Moves the mouse cursor to screen coordinates `(x, y)`.        |
+각 메서드는 대응되는 Tauri command를 호출합니다.
 
-**Example**
+- `input_simulate_key_press`
+- `input_simulate_key_down`
+- `input_simulate_key_up`
+- `input_simulate_mouse_click`
+- `input_simulate_mouse_move`
 
-```ts
-const sim = useSimulate()
+## Frida
 
-sim.keyPress('Return')
-sim.mouseMove(500, 300)
-sim.mouseClick(500, 300)
-```
-
----
-
-## Frida Hooks
-
-### `useDevices`
-
-Lists all Frida-accessible devices, refreshing on mount.
+### `useDevices()`
 
 ```ts
-function useDevices(): DevicesHandle
-```
-
-**Returns** `DevicesHandle`
-
-```ts
-interface DevicesHandle {
+function useDevices(): {
   devices: Accessor<Device[]>
   refresh(): void
 }
 ```
 
-| Member      | Description                                          |
-|-------------|------------------------------------------------------|
-| `devices`   | Reactive signal containing the current device list.  |
-| `refresh()` | Re-queries the backend and updates `devices`.        |
+- mount 시 `frida_list_devices` 자동 호출
 
-**Example**
-
-```ts
-const { devices, refresh } = useDevices()
-
-createEffect(() => {
-  console.log(devices().map(d => d.name))
-})
-
-// Manually refresh
-refresh()
-```
-
----
-
-### `useDevice`
-
-Finds a single Frida device matching an optional filter, and provides spawn/attach helpers.
+### `useDevice(filter?)`
 
 ```ts
 function useDevice(filter?: {
   type?: 'usb' | 'local' | 'remote'
   id?: string
-}): DeviceHandle
-```
-
-**Parameters**
-
-| Parameter       | Type                              | Description                          |
-|-----------------|-----------------------------------|--------------------------------------|
-| `filter`        | `object` (optional)               | Constraints for device selection.    |
-| `filter.type`   | `'usb' \| 'local' \| 'remote'`   | Filter by connection type.           |
-| `filter.id`     | `string`                          | Filter by exact device ID.           |
-
-If no filter is provided, the first available device is selected.
-
-**Returns** `DeviceHandle`
-
-```ts
-interface DeviceHandle {
+}): {
   device: Accessor<Device | null>
   status: Accessor<'searching' | 'connected' | 'disconnected'>
-  spawn(bundleId: string, opts?: SpawnOptions): Promise<Session>
+  refresh(): Promise<void>
+  spawn(program: string, opts?: SpawnOptions): Promise<Session>
   attach(pid: number): Promise<Session>
+  enumerateProcesses(): Promise<Process[]>
+  resume(pid: number): Promise<void>
 }
 ```
 
-| Member      | Description                                                                        |
-|-------------|------------------------------------------------------------------------------------|
-| `device`    | Reactive signal with the matched `Device`, or `null` if not found.                 |
-| `status`    | Reactive signal: `'searching'` while probing, `'connected'` or `'disconnected'`.   |
-| `spawn(bundleId, opts)` | Spawns an app by bundle ID and attaches, returning a `Session`.      |
-| `attach(pid)` | Attaches to a running process by PID, returning a `Session`.                     |
+`spawn` 동작:
 
-**Throws**
+1. 우선 `frida_spawn_attach`(1-roundtrip) 시도
+2. 미지원/실패 시 `frida_spawn` + `frida_attach` fallback
+3. fallback 미지원 상태는 일정 시간 캐시해 반복 시도 비용을 줄임
 
-- `Error('No device connected')` if `spawn` or `attach` is called while `device()` is `null`.
-- `SpawnFailedError` if the backend cannot spawn the target process.
-
-**Example**
+### `useSession(session)`
 
 ```ts
-const { device, status, spawn, attach } = useDevice({ type: 'usb' })
-
-createEffect(() => {
-  if (status() === 'connected') {
-    console.log('Device ready:', device()?.name)
-  }
-})
-
-// Spawn an app
-const session = await spawn('com.example.App')
-
-// Or attach to a running process
-const session2 = await attach(1234)
-```
-
----
-
-### `useSession`
-
-Manages a Frida session: loads scripts and tracks detach state.
-
-```ts
-function useSession(session: Session): SessionHandle
-```
-
-**Parameters**
-
-| Parameter | Type      | Description                              |
-|-----------|-----------|------------------------------------------|
-| `session` | `Session` | A session object returned by `useDevice`. |
-
-**Returns** `SessionHandle`
-
-```ts
-interface SessionHandle {
+function useSession(session: Session): {
   status: Accessor<'attached' | 'detached'>
-  loadScript(code: string): Promise<Script>
-  loadScriptFile(path: string): Promise<Script>
+  loadScript(code: string, storeName?: string): Promise<Script>
+  loadScriptFile(path: string, storeName?: string): Promise<Script>
+  unloadScript(scriptId: string): Promise<void>
   detach(): void
 }
 ```
 
-| Member               | Description                                                            |
-|----------------------|------------------------------------------------------------------------|
-| `status`             | Reactive signal: `'attached'` or `'detached'`.                         |
-| `loadScript(code)`   | Compiles and injects `code` as a Frida script. Returns a `Script`.     |
-| `loadScriptFile(path)` | Loads a Frida script from a file path on the host. Returns a `Script`. |
-| `detach()`           | Detaches from the process and sets `status` to `'detached'`.           |
+- `frida:session-detached` 이벤트 수신 시 `status='detached'`
+- `storeName` 전달 시 runtime에서 `__whale_store__` preamble이 함께 주입됨
 
-**Notes**
+## Runtime 유틸
 
-- Listens to the `frida:session-detached` event to update `status` reactively when the target process exits.
-- The event listener is cleaned up automatically inside a SolidJS component.
-
-**Example**
+### `isTauriRuntime()`
 
 ```ts
-const device = useDevice({ type: 'usb' })
-const session = await device.spawn('com.example.App')
-const { status, loadScript, detach } = useSession(session)
-
-const script = await loadScript(`
-  Interceptor.attach(Module.getExportByName(null, 'open'), {
-    onEnter(args) { console.log('open:', args[0].readUtf8String()) }
-  })
-`)
-
-createEffect(() => {
-  if (status() === 'detached') console.log('Session ended')
-})
-
-// Detach manually
-detach()
+function isTauriRuntime(): boolean
 ```
 
----
+- 브라우저에서 `window.__TAURI_INTERNALS__` 기반 감지
+- 테스트/비브라우저 환경에서는 true로 처리해 mock 환경 호환
 
-## Types
-
-### `SyncStore<T>`
+### `safeInvoke<T>(command, payload?)`
 
 ```ts
-type SyncStore<T extends Record<string, any>> =
-  { readonly [K in keyof T]: T[K] } &
-  { [K in keyof T & string as `set${Capitalize<K>}`]: (value: T[K]) => void }
+function safeInvoke<T>(
+  command: string,
+  payload?: Record<string, unknown>,
+): Promise<T | undefined>
 ```
 
-A reactive proxy that exposes each key of `T` as a readonly getter and a corresponding `setXxx` setter.
+- invoke 실패 시 throw하지 않고 `undefined` 반환
 
----
-
-### `WindowConfig`
+### `safeInvokeVoid(command, payload?)`
 
 ```ts
-interface WindowConfig {
-  entry: string
-  width?: number
-  height?: number
-  resizable?: boolean
-  alwaysOnTop?: boolean
-  transparent?: boolean
-  decorations?: boolean
-  skipTaskbar?: boolean
-  visible?: boolean
-  position?: { x: number; y: number } | string
-  clickThrough?: boolean
+function safeInvokeVoid(command: string, payload?: Record<string, unknown>): void
+```
+
+- fire-and-forget용
+- 내부 오류를 삼키고 앱 흐름을 끊지 않음
+
+### `safeListen<T>(event, handler)`
+
+```ts
+function safeListen<T>(
+  event: EventName,
+  handler: (event: Event<T>) => void,
+): Promise<UnlistenFn>
+```
+
+- listen 실패 시 noop unlisten 반환
+
+## 주요 타입
+
+```ts
+type SyncStore<T extends Record<string, unknown>> = {
+  readonly [K in keyof T]: T[K]
+} & {
+  [K in keyof T & string as `set${Capitalize<K>}`]: (value: T[K]) => void
 }
 ```
-
-Configuration passed when creating a new WhaLe window.
-
----
-
-### `Device`
 
 ```ts
 interface Device {
@@ -452,103 +250,34 @@ interface Device {
   name: string
   type: 'local' | 'usb' | 'remote'
 }
-```
 
-Represents a Frida-accessible device.
-
----
-
-### `Session`
-
-```ts
 interface Session {
   id: string
   pid: number
 }
-```
 
-Represents an active Frida session attached to a process.
-
----
-
-### `SpawnOptions`
-
-```ts
 interface SpawnOptions {
   realm?: 'native' | 'emulated'
 }
-```
 
-Options passed to `useDevice().spawn()`.
-
----
-
-### `Script`
-
-```ts
 interface Script {
   id: string
 }
-```
 
-Represents a loaded Frida script.
-
----
-
-## Errors
-
-All errors extend `WhaleError`, which extends `Error` with an additional `code` property.
-
-### `WhaleError`
-
-```ts
-class WhaleError extends Error {
-  code: string
+interface Process {
+  pid: number
+  name: string
 }
 ```
 
-Base class for all WhaLe SDK errors.
+## 에러 타입
 
----
+`types.ts`에는 아래 클래스가 정의되어 있습니다.
 
-### `DeviceNotFoundError`
+- `WhaleError`
+- `DeviceNotFoundError`
+- `SpawnFailedError`
+- `ScriptError`
+- `HotkeyConflictError`
 
-```ts
-new DeviceNotFoundError(filter?: string)
-// code: 'DEVICE_NOT_FOUND'
-```
-
-Thrown when no Frida device matches the requested filter.
-
----
-
-### `SpawnFailedError`
-
-```ts
-new SpawnFailedError(bundleId: string, reason?: string)
-// code: 'SPAWN_FAILED'
-```
-
-Thrown when the backend fails to spawn a process.
-
----
-
-### `ScriptError`
-
-```ts
-new ScriptError(message: string)
-// code: 'SCRIPT_ERROR'
-```
-
-Thrown when a Frida script fails to load or execute.
-
----
-
-### `HotkeyConflictError`
-
-```ts
-new HotkeyConflictError(keys: string[])
-// code: 'HOTKEY_CONFLICT'
-```
-
-Thrown when a hotkey combination is already registered.
+현재 훅 구현은 대부분 `safeInvoke` 기반으로 실패를 `undefined` 처리하므로, 위 에러 클래스는 앱 레벨에서 커스텀 에러 모델로 활용하는 용도로 보는 것이 안전합니다.
