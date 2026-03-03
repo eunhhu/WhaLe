@@ -1,4 +1,4 @@
-import { createSyncStore } from '@whale/sdk'
+import { createSyncStore } from '@whale1/sdk'
 
 export const trainer = createSyncStore('trainer', {
   speedHack: 1.0,

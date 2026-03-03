@@ -4,18 +4,18 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "bun --filter @whale/sdk build && bun --filter @whale/ui build && bun --filter @whale/cli build && whale dev",
-    "build": "bun --filter @whale/sdk build && bun --filter @whale/ui build && bun --filter @whale/cli build && whale build",
+    "dev": "bun --filter @whale1/sdk build && bun --filter @whale1/ui build && bun --filter @whale1/cli build && whale dev",
+    "build": "bun --filter @whale1/sdk build && bun --filter @whale1/ui build && bun --filter @whale1/cli build && whale build",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@whale/sdk": "workspace:*",
-    "@whale/ui": "workspace:*",
+    "@whale1/sdk": "workspace:*",
+    "@whale1/ui": "workspace:*",
     "solid-js": "^1.9.11"
   },
   "devDependencies": {
     "@types/frida-gum": "^19.0.2",
-    "@whale/cli": "workspace:*",
+    "@whale1/cli": "workspace:*",
     "typescript": "^5.9.3"
   }
 }
