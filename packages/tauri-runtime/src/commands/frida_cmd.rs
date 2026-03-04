@@ -115,6 +115,19 @@ fn resolve_spawn_target(
         .ok_or_else(|| "Missing required spawn target: provide program (or bundleId)".to_string())
 }
 
+fn emit_devtools_frida_log(app: &AppHandle, level: &str, message: String) {
+    if cfg!(debug_assertions) {
+        let _ = app.emit(
+            "devtools:log",
+            &serde_json::json!({
+                "source": "frida",
+                "level": level,
+                "message": message,
+            }),
+        );
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tauri commands
 // ---------------------------------------------------------------------------
@@ -145,6 +158,7 @@ pub async fn frida_enumerate_processes(
 /// Spawn a process on a device
 #[tauri::command]
 pub async fn frida_spawn(
+    app: AppHandle,
     frida: State<'_, FridaManager>,
     device_id: String,
     program: Option<String>,
@@ -152,14 +166,40 @@ pub async fn frida_spawn(
 ) -> Result<u32, String> {
     let target_program = resolve_spawn_target(program, bundle_id)?;
     let sender = frida.inner().clone_sender();
-    tauri::async_runtime::spawn_blocking(move || request_spawn(&sender, device_id, target_program))
-        .await
-        .map_err(|e| format!("Task join error: {}", e))?
+    let log_device_id = device_id.clone();
+    let log_target_program = target_program.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        request_spawn(&sender, device_id, target_program)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?;
+
+    match &result {
+        Ok(pid) => emit_devtools_frida_log(
+            &app,
+            "info",
+            format!(
+                "spawn succeeded device={} program={} pid={}",
+                log_device_id, log_target_program, pid
+            ),
+        ),
+        Err(err) => emit_devtools_frida_log(
+            &app,
+            "error",
+            format!(
+                "spawn failed device={} program={} error={}",
+                log_device_id, log_target_program, err
+            ),
+        ),
+    }
+
+    result
 }
 
 /// Spawn and immediately attach on a device in one IPC round-trip.
 #[tauri::command]
 pub async fn frida_spawn_attach(
+    app: AppHandle,
     frida: State<'_, FridaManager>,
     device_id: String,
     program: Option<String>,
@@ -167,11 +207,34 @@ pub async fn frida_spawn_attach(
 ) -> Result<SpawnAttachData, String> {
     let target_program = resolve_spawn_target(program, bundle_id)?;
     let sender = frida.inner().clone_sender();
-    tauri::async_runtime::spawn_blocking(move || {
+    let log_device_id = device_id.clone();
+    let log_target_program = target_program.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
         request_spawn_attach(&sender, device_id, target_program)
     })
     .await
-    .map_err(|e| format!("Task join error: {}", e))?
+    .map_err(|e| format!("Task join error: {}", e))?;
+
+    match &result {
+        Ok(data) => emit_devtools_frida_log(
+            &app,
+            "info",
+            format!(
+                "spawn_attach succeeded device={} program={} pid={} session={}",
+                log_device_id, log_target_program, data.pid, data.session_id
+            ),
+        ),
+        Err(err) => emit_devtools_frida_log(
+            &app,
+            "error",
+            format!(
+                "spawn_attach failed device={} program={} error={}",
+                log_device_id, log_target_program, err
+            ),
+        ),
+    }
+
+    result
 }
 
 /// Resume a spawned process
@@ -190,19 +253,44 @@ pub async fn frida_resume(
 /// Attach to a process on a device
 #[tauri::command]
 pub async fn frida_attach(
+    app: AppHandle,
     frida: State<'_, FridaManager>,
     device_id: String,
     pid: u32,
 ) -> Result<String, String> {
     let sender = frida.inner().clone_sender();
-    tauri::async_runtime::spawn_blocking(move || request_attach(&sender, device_id, pid))
-        .await
-        .map_err(|e| format!("Task join error: {}", e))?
+    let log_device_id = device_id.clone();
+    let result =
+        tauri::async_runtime::spawn_blocking(move || request_attach(&sender, device_id, pid))
+            .await
+            .map_err(|e| format!("Task join error: {}", e))?;
+
+    match &result {
+        Ok(session_id) => emit_devtools_frida_log(
+            &app,
+            "info",
+            format!(
+                "attach succeeded device={} pid={} session={}",
+                log_device_id, pid, session_id
+            ),
+        ),
+        Err(err) => emit_devtools_frida_log(
+            &app,
+            "error",
+            format!(
+                "attach failed device={} pid={} error={}",
+                log_device_id, pid, err
+            ),
+        ),
+    }
+
+    result
 }
 
 /// Load a script into a session, with optional __whale_store__ preamble
 #[tauri::command]
 pub async fn frida_load_script(
+    app: AppHandle,
     frida: State<'_, FridaManager>,
     store_manager: State<'_, StoreManager>,
     session_id: String,
@@ -222,16 +310,44 @@ pub async fn frida_load_script(
     };
 
     let sender = frida.inner().clone_sender();
-    tauri::async_runtime::spawn_blocking(move || {
+    let log_session_id = session_id.clone();
+    let log_store_name = store_name.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
         request_load_script(&sender, session_id, final_code, store_name)
     })
     .await
-    .map_err(|e| format!("Task join error: {}", e))?
+    .map_err(|e| format!("Task join error: {}", e))?;
+
+    match &result {
+        Ok(script_id) => emit_devtools_frida_log(
+            &app,
+            "info",
+            format!(
+                "load_script succeeded session={} script={} store={}",
+                log_session_id,
+                script_id,
+                log_store_name.as_deref().unwrap_or("-")
+            ),
+        ),
+        Err(err) => emit_devtools_frida_log(
+            &app,
+            "error",
+            format!(
+                "load_script failed session={} store={} error={}",
+                log_session_id,
+                log_store_name.as_deref().unwrap_or("-"),
+                err
+            ),
+        ),
+    }
+
+    result
 }
 
 /// Load a script from a file path
 #[tauri::command]
 pub async fn frida_load_script_file(
+    app: AppHandle,
     frida: State<'_, FridaManager>,
     store_manager: State<'_, StoreManager>,
     session_id: String,
@@ -254,11 +370,41 @@ pub async fn frida_load_script_file(
     };
 
     let sender = frida.inner().clone_sender();
-    tauri::async_runtime::spawn_blocking(move || {
+    let log_session_id = session_id.clone();
+    let log_store_name = store_name.clone();
+    let log_path = path.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
         request_load_script(&sender, session_id, final_code, store_name)
     })
     .await
-    .map_err(|e| format!("Task join error: {}", e))?
+    .map_err(|e| format!("Task join error: {}", e))?;
+
+    match &result {
+        Ok(script_id) => emit_devtools_frida_log(
+            &app,
+            "info",
+            format!(
+                "load_script_file succeeded session={} script={} file={} store={}",
+                log_session_id,
+                script_id,
+                log_path,
+                log_store_name.as_deref().unwrap_or("-")
+            ),
+        ),
+        Err(err) => emit_devtools_frida_log(
+            &app,
+            "error",
+            format!(
+                "load_script_file failed session={} file={} store={} error={}",
+                log_session_id,
+                log_path,
+                log_store_name.as_deref().unwrap_or("-"),
+                err
+            ),
+        ),
+    }
+
+    result
 }
 
 /// Unload a script
