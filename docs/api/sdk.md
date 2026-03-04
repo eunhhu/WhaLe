@@ -177,10 +177,12 @@ function useDevice(filter?: {
 2. 미지원/실패 시 `frida_spawn` + `frida_attach` fallback
 3. fallback 미지원 상태는 일정 시간 캐시해 반복 시도 비용을 줄임
 
-### `useSession(session)`
+### `useSession(session)` — Session 핸들
 
 ```ts
-function useSession(session: Session): {
+function useSession(session: Session): SessionHandle
+
+interface SessionHandle {
   status: Accessor<'attached' | 'detached'>
   loadScript(code: string, storeName?: string): Promise<Script>
   loadScriptFile(path: string, storeName?: string): Promise<Script>
@@ -191,6 +193,57 @@ function useSession(session: Session): {
 
 - `frida:session-detached` 이벤트 수신 시 `status='detached'`
 - `storeName` 전달 시 runtime에서 `__whale_store__` preamble이 함께 주입됨
+
+### `useSession(device, options?)` — 통합 세션 관리
+
+`DeviceHandle`을 받아 기기 연결 → 프로세스 목록 → attach → 스크립트 로드 전체 흐름을 단일 훅으로 관리합니다.
+
+```ts
+function useSession(
+  device: DeviceHandle,
+  options?: { scripts?: ScriptConfig[] }
+): IntegratedSessionHandle
+
+interface ScriptConfig {
+  entry: string
+  store?: string
+}
+
+type SessionPhase = 'idle' | 'searching' | 'connected' | 'attached' | 'scripted'
+
+interface IntegratedSessionHandle {
+  phase: Accessor<SessionPhase>
+  processes: Accessor<Process[]>
+  session: Accessor<Session | null>
+  error: Accessor<string | null>
+  fetchProcesses(): Promise<void>
+  attachToProcess(pid: number): Promise<void>
+  spawnAndAttach(bundleId: string): Promise<void>
+  detach(): void
+}
+```
+
+**기본 사용 패턴:**
+
+```ts
+import { useDevice, useSession } from '@whale1/sdk'
+import whaleConfig from '../whale.config'
+
+const device = useDevice({ type: 'usb' })
+const session = useSession(device, {
+  scripts: whaleConfig.frida?.scripts,
+})
+
+// phase: 'idle' → 'searching' → 'connected' → 'attached' → 'scripted'
+// scripts는 attach 후 자동 로드됨
+```
+
+**동작 요약:**
+
+- `phase`는 device 상태 + attach/script 로드 상태를 반영
+- `scripts` 옵션에 파일을 전달하면 `attachToProcess`/`spawnAndAttach` 후 자동 로드 → `phase='scripted'`
+- `frida:session-detached` 이벤트 발생 시 session 초기화 후 `phase='connected'`(기기 있음) 또는 `'idle'`으로 복귀
+- `detach()` 호출 시 session 해제 후 `phase='connected'`(기기 있음) 또는 `'idle'`으로 복귀
 
 ## Runtime 유틸
 

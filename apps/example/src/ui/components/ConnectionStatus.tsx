@@ -1,6 +1,5 @@
 import { Text, Flex, Badge, Button } from '@whale1/ui'
-import type { Phase } from '../../frida/session'
-import type { Device, Session } from '@whale1/sdk'
+import type { SessionPhase as Phase, Device, Session } from '@whale1/sdk'
 
 interface Step {
   label: string

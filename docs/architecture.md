@@ -31,6 +31,7 @@ Target Process (injected script + __whale_store__)
 
 - 앱 코드에서 사용하는 훅/API (`createSyncStore`, `useHotkey`, `useWindow`, `useDevice`, `useSession` 등)
 - Tauri API(`invoke`, `listen`)를 직접 감싸는 안전 래퍼(`safeInvoke`, `safeListen`)
+- `useSession(device, { scripts })` 오버로드로 기기 연결 → 프로세스 attach → 스크립트 자동 로드 전체 흐름을 단일 훅으로 제공
 
 ### packages/tauri-runtime
 
@@ -43,6 +44,7 @@ Target Process (injected script + __whale_store__)
 
 - 실제 사용 예시
 - `trainer` store + main/overlay/settings window + frida script
+- `useDevice` + `useSession(device, { scripts })` 패턴으로 Frida 세션 관리 (별도 session.ts 불필요)
 
 ## 3) Store 동기화 흐름
 

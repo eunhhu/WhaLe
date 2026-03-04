@@ -1,134 +1,117 @@
 # WhaLe
 
-WhaLe는 **Tauri + SolidJS + Frida + rdev** 기반의 게임 트레이너 프레임워크입니다.
+WhaLe는 **Tauri + SolidJS + Frida** 기반 트레이너 앱 프레임워크입니다.
 
-핵심 목표는 하나입니다.
+핵심은 다음 3가지를 쉽게 만드는 것입니다.
+- 멀티 윈도우 앱(main/overlay/settings)
+- UI ↔ Rust ↔ Frida 스토어 동기화
+- dev/build/create 자동화 CLI
 
-- UI(TypeScript/Solid)에서 상태를 바꾸면
-- Rust 백엔드와 Frida 스크립트가 같은 상태를 공유하고
-- 여러 윈도우(메인/오버레이/설정)가 즉시 동기화됩니다.
+---
 
-## 한눈에 보기
+## 1분 시작 (신규 프로젝트)
 
-```txt
-packages/
-  cli/            whale CLI (dev/build/create/config)
-  sdk/            앱 코드에서 쓰는 훅/스토어 API
-  ui/             공통 UI 컴포넌트
-  tauri-runtime/  Rust 런타임 (window/input/frida/store)
-apps/
-  example/        실행 가능한 예제 앱
-assets/
-  icon.png        기본 앱 아이콘 소스
+### 요구 사항
+- `Node.js 20+`
+- `npm` (또는 `bun`)
+- Rust는 선택 사항 (없어도 frontend-only 개발 가능)
+
+### 생성
+```bash
+npx @whale1/cli create my-whale-app
+cd my-whale-app
+npm install
 ```
 
-## 빠른 시작
+### 개발 실행
+```bash
+npm run dev
+```
 
-### 1) 요구 사항
+### Rust 없이 UI만 개발
+```bash
+WHALE_SKIP_TAURI=1 npm run dev
+```
 
-- `bun`
-- `node`/`npx` (Tauri CLI 실행용)
-- Rust 툴체인(`cargo`)은 선택 사항
+이 모드에서는 HMR/UI 개발은 가능하고, Tauri 네이티브 기능(윈도우 제어/글로벌 입력/Frida IPC)은 비활성입니다.
 
-Rust가 없으면 프론트엔드-only 모드로 실행 가능합니다.
+### 빌드
+```bash
+# frontend + tauri bundle
+npm run build
 
-### 2) 설치
+# frontend only
+WHALE_SKIP_TAURI=1 npm run build
+```
 
+---
+
+## 생성되는 starter 구성
+
+```txt
+my-whale-app/
+  assets/icon.png
+  whale.config.ts
+  src/
+    ui/windows/main.tsx
+    store/app.ts
+    script/main.ts
+```
+
+- 기본 앱 아이콘은 `assets/icon.png`
+- 앱명/윈도우 타이틀/식별자는 `whale.config.ts`에서 설정
+- `frida.scripts`에 등록한 스크립트는 attach 시 자동 로드됨 (별도 `session.ts` 불필요)
+
+---
+
+## CLI 명령
+
+- `whale create <name>`: 새 프로젝트 생성
+- `whale dev`: 개발 서버 + Tauri dev
+- `whale build`: 프로덕션 빌드
+- `whale config:generate [out]`: tauri config 생성
+- `whale clean [--all]`: `.whale`, `src-tauri/target` 정리 (`--all`은 `node_modules` 포함)
+
+---
+
+## 런타임 안전 처리 (권장)
+
+Rust/Tauri가 없는 환경도 고려해서 네이티브 호출은 가드하세요.
+
+```ts
+import { isTauriRuntime, safeInvoke } from '@whale1/sdk'
+
+if (isTauriRuntime()) {
+  await safeInvoke('store_set_persist_enabled', { enabled: true })
+}
+```
+
+---
+
+## 이 저장소에서 개발하기 (프레임워크 기여)
+
+### 설치
 ```bash
 bun install
 ```
 
-### 3) 예제 앱 실행
-
-루트에서 바로 실행:
-
+### example 앱 실행
 ```bash
 bun --filter whale-example-trainer dev
 ```
 
-또는 example 디렉터리에서:
-
-```bash
-cd apps/example
-bun run dev
-```
-
-### 4) Rust 없는 개발 환경 (안전 모드)
-
+### example 앱을 frontend-only로 실행
 ```bash
 WHALE_SKIP_TAURI=1 bun --filter whale-example-trainer dev
 ```
 
-이 모드에서는 Vite/HMR과 UI 개발은 가능하지만, Tauri 네이티브 기능(윈도우 제어, 글로벌 입력, Frida 연결)은 동작하지 않습니다.
-
-## 자주 쓰는 개념
-
-### 1) Sync Store
-
-```ts
-import { createSyncStore } from '@whale1/sdk'
-
-export const trainer = createSyncStore('trainer', {
-  speedHack: 1.0,
-  godMode: false,
-})
-
-trainer.setGodMode(true)
+### 테스트/빌드
+```bash
+bun test
+bun run build
 ```
 
-- `setXxx` 호출 시 UI 상태를 먼저 반영하고, Rust `store_set`으로 동기화합니다.
-- 초기 마운트 때 `store_get_all`로 persisted 상태를 다시 가져와 UI를 hydrate 합니다.
-
-### 2) 글로벌 핫키 (press/release 구분)
-
-```ts
-import { useHotkey } from '@whale1/sdk'
-
-useHotkey(['ctrl', 'f1'], {
-  onPress: () => console.log('pressed'),
-  onRelease: () => console.log('released'),
-})
-```
-
-### 3) 윈도우 제어
-
-```ts
-import { useWindow } from '@whale1/sdk'
-
-const overlay = useWindow('overlay')
-overlay.toggle()
-```
-
-- `show`/`toggle`는 닫힌 윈도우도 config 기반으로 다시 생성해서 열 수 있습니다.
-
-### 4) Frida 세션
-
-```ts
-import { useDevice, useSession } from '@whale1/sdk'
-
-const device = useDevice({ type: 'local' })
-const session = await device.attach(1234)
-const handle = useSession(session)
-await handle.loadScriptFile('./src/script/main.ts', 'trainer')
-```
-
-## CLI
-
-- `whale dev`: 개발 실행 (HTML 엔트리 + tauri.conf 생성 + Vite + Tauri)
-- `whale build`: 프로덕션 빌드
-- `whale create <name>`: 새 프로젝트 생성
-- `whale config:generate [out]`: Tauri 설정 파일 생성
-- `whale clean [--all]`: `.whale`, `src-tauri/target` 정리 (`--all`은 `node_modules` 포함)
-
-## 생성/동기화되는 파일
-
-`whale dev` 기준으로 아래가 자동 처리됩니다.
-
-- `.whale/*.html` / `.whale/__whale_entry_*.ts`
-- `.whale/tauri.conf.json`
-- `src-tauri` 미존재 시 `tauri init` 자동 실행
-- `src-tauri/capabilities/default.json`의 windows 목록 자동 동기화
-- 아이콘 소스(`app.icon` 또는 `assets/icon.png`) 기준으로 `src-tauri/icons/*` 재생성
+---
 
 ## 문서
 
@@ -137,14 +120,6 @@ await handle.loadScriptFile('./src/script/main.ts', 'trainer')
 - [SDK API](./docs/api/sdk.md)
 - [설정 가이드](./docs/config.md)
 - [개발/디버깅 가이드](./docs/dev-and-troubleshooting.md)
-
-## 테스트
-
-```bash
-bun test
-```
-
-현재 테스트는 `packages/*`의 Vitest 기반 단위/통합 테스트를 실행합니다.
 
 ## 라이선스
 

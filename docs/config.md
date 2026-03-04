@@ -86,10 +86,11 @@ export default defineConfig({
 
 | 필드 | 타입 | 설명 |
 |---|---|---|
-| `scripts` | `{ entry: string; store?: string }[]` | 자동 로드할 Frida 스크립트 목록 |
+| `scripts` | `{ entry: string; store?: string }[]` | attach 시 자동 로드할 Frida 스크립트 목록 |
 
 - `entry`는 실제 파일이어야 하며, `whale dev/build`에서 존재 여부를 검증합니다.
 - `store`를 지정하면 runtime이 `__whale_store__` preamble을 주입합니다.
+- `useSession(device, { scripts: whaleConfig.frida?.scripts })` 패턴으로 전달하면 attach 후 자동 로드됩니다. 별도 `loadScripts()` 호출이 필요 없습니다.
 
 ## store
 

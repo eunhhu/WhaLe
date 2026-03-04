@@ -90,4 +90,44 @@ describe('useSession', () => {
     capturedDetachedHandler?.({ payload: { sessionId: 'sess-6' } })
     expect(session.status()).toBe('detached')
   })
+
+  it('integrated mode should detach backend session even when no scripts are configured', async () => {
+    const { invoke } = await import('@tauri-apps/api/core')
+    const mockInvoke = vi.mocked(invoke)
+
+    const { useSession } = await import('../hooks/useSession')
+    const device = {
+      device: () => ({ id: 'usb-1', name: 'USB Device', type: 'usb' as const }),
+      status: () => 'connected' as const,
+      refresh: vi.fn(async () => {}),
+      spawn: vi.fn(async () => ({ id: 'sess-spawn', pid: 123 })),
+      attach: vi.fn(async () => ({ id: 'sess-int', pid: 42 })),
+      enumerateProcesses: vi.fn(async () => []),
+      resume: vi.fn(async () => {}),
+    }
+
+    const integrated = useSession(device, { scripts: [] })
+    await integrated.attachToProcess(42)
+    expect(integrated.phase()).toBe('scripted')
+
+    integrated.detach()
+    expect(invoke).toHaveBeenCalledWith('frida_detach', { sessionId: 'sess-int' })
+  })
+
+  it('integrated mode should start from current device status', async () => {
+    const { useSession } = await import('../hooks/useSession')
+    const makeDevice = (status: 'searching' | 'connected' | 'disconnected') => ({
+      device: () => (status === 'connected' ? { id: 'usb-1', name: 'USB Device', type: 'usb' as const } : null),
+      status: () => status,
+      refresh: vi.fn(async () => {}),
+      spawn: vi.fn(async () => ({ id: 'sess-spawn', pid: 123 })),
+      attach: vi.fn(async () => ({ id: 'sess-int', pid: 42 })),
+      enumerateProcesses: vi.fn(async () => []),
+      resume: vi.fn(async () => {}),
+    })
+
+    expect(useSession(makeDevice('connected')).phase()).toBe('connected')
+    expect(useSession(makeDevice('searching')).phase()).toBe('searching')
+    expect(useSession(makeDevice('disconnected')).phase()).toBe('idle')
+  })
 })

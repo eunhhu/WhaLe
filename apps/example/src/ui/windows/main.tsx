@@ -1,16 +1,18 @@
 import { Show, createEffect } from 'solid-js'
 import { Button, Switch, Slider, Text, Flex, Card, Badge, Separator, Tooltip, ThemeProvider } from '@whale1/ui'
-import { useHotkey, useWindow } from '@whale1/sdk'
+import { useHotkey, useWindow, useDevice, useSession } from '@whale1/sdk'
 import { trainer } from '../../store/trainer'
-import { createTrainerSession } from '../../frida/session'
+import whaleConfig from '../../../whale.config'
 import ConnectionStatus from '../components/ConnectionStatus'
 import ProcessList from '../components/ProcessList'
 
 export default function Main() {
-  const session = createTrainerSession()
+  const deviceHandle = useDevice({ type: 'usb' })
+  const session = useSession(deviceHandle, {
+    scripts: whaleConfig.frida?.scripts,
+  })
   const overlay = useWindow('overlay')
   const settings = useWindow('settings')
-  let autoLoadedSessionId: string | null = null
 
   useHotkey(['f1'], () => trainer.setGodMode(!trainer.godMode))
   useHotkey(['f2'], () => trainer.setInfiniteAmmo(!trainer.infiniteAmmo))
@@ -20,19 +22,6 @@ export default function Main() {
   createEffect(() => {
     if (session.phase() === 'connected') {
       void session.fetchProcesses()
-    }
-  })
-
-  // Auto-load scripts after attach
-  createEffect(() => {
-    const phase = session.phase()
-    const currentSession = session.session()
-    if (phase === 'attached' && currentSession?.id && currentSession.id !== autoLoadedSessionId) {
-      autoLoadedSessionId = currentSession.id
-      void session.loadScripts()
-    }
-    if (phase === 'idle') {
-      autoLoadedSessionId = null
     }
   })
 
@@ -53,10 +42,10 @@ export default function Main() {
         <Card>
           <ConnectionStatus
             phase={session.phase()}
-            device={session.device()}
+            device={deviceHandle.device()}
             session={session.session()}
             error={session.error()}
-            onRefresh={() => void session.refresh()}
+            onRefresh={() => void deviceHandle.refresh()}
           />
         </Card>
 
