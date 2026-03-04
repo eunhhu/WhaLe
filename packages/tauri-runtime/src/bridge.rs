@@ -30,7 +30,7 @@ fn env_flag_enabled(name: &str, default_enabled: bool) -> bool {
 
 fn devtools_frida_log_stream_enabled() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();
-    *ENABLED.get_or_init(|| env_flag_enabled("WHALE_DEVTOOLS_FRIDA_LOG", false))
+    *ENABLED.get_or_init(|| env_flag_enabled("WHALE_DEVTOOLS_FRIDA_LOG", true))
 }
 
 /// Frida 스크립트에서 send()된 메시지를 처리
@@ -38,14 +38,12 @@ fn devtools_frida_log_stream_enabled() -> bool {
 pub fn handle_frida_message(app: &AppHandle, message: &Value) {
     // Emit to devtools in debug mode
     if cfg!(debug_assertions) && devtools_frida_log_stream_enabled() {
-        let _ = app.emit(
-            "devtools:log",
-            &serde_json::json!({
-                "source": "frida",
-                "level": "info",
-                "message": message.to_string(),
-            }),
-        );
+        let payload = serde_json::json!({
+            "source": "frida",
+            "level": "info",
+            "message": message.to_string(),
+        });
+        let _ = app.emit("devtools:log", &payload);
     }
 
     if let Some((store_name, patch_map)) = parse_whale_message(message) {

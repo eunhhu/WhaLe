@@ -1,5 +1,5 @@
 import { createSignal, onMount, onCleanup, For, type Component } from 'solid-js'
-import { safeListen } from '../tauri'
+import { getCurrentWindowLabel, isTauriRuntime, safeListen } from '../tauri'
 
 interface LogEntry {
   id: number
@@ -24,6 +24,30 @@ const sourceColors: Record<string, string> = {
   rust: '#ffb86c',
   store: '#50fa7b',
   event: '#8be9fd',
+}
+
+function normalizeLevel(level: unknown): string {
+  if (typeof level !== 'string') return 'info'
+  const lowered = level.toLowerCase()
+  if (lowered === 'warning') return 'warn'
+  if (['info', 'warn', 'error', 'debug'].includes(lowered)) return lowered
+  return 'info'
+}
+
+function normalizeSource(source: unknown): string {
+  if (typeof source !== 'string') return 'event'
+  const lowered = source.toLowerCase()
+  if (['frida', 'rust', 'store', 'event'].includes(lowered)) return lowered
+  return 'event'
+}
+
+function normalizeMessage(message: unknown): string {
+  if (typeof message === 'string') return message
+  try {
+    return JSON.stringify(message)
+  } catch {
+    return String(message)
+  }
 }
 
 export const Console: Component = () => {
@@ -51,9 +75,20 @@ export const Console: Component = () => {
   }
 
   onMount(async () => {
+    addLog({
+      source: 'event',
+      level: 'debug',
+      message: `console ready runtime=${String(isTauriRuntime())} window=${getCurrentWindowLabel() ?? 'unknown'}`,
+    })
+
     const unlistenLog = await safeListen<{ source: string; level: string; message: string }>(
       'devtools:log',
-      (event) => addLog(event.payload),
+      (event) =>
+        addLog({
+          source: normalizeSource(event.payload?.source),
+          level: normalizeLevel(event.payload?.level),
+          message: normalizeMessage(event.payload?.message),
+        }),
     )
 
     onCleanup(() => unlistenLog())

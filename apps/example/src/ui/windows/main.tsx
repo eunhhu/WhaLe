@@ -10,6 +10,7 @@ export default function Main() {
   const session = createTrainerSession()
   const overlay = useWindow('overlay')
   const settings = useWindow('settings')
+  let autoLoadedSessionId: string | null = null
 
   useHotkey(['f1'], () => trainer.setGodMode(!trainer.godMode))
   useHotkey(['f2'], () => trainer.setInfiniteAmmo(!trainer.infiniteAmmo))
@@ -24,8 +25,14 @@ export default function Main() {
 
   // Auto-load scripts after attach
   createEffect(() => {
-    if (session.phase() === 'attached') {
+    const phase = session.phase()
+    const currentSession = session.session()
+    if (phase === 'attached' && currentSession?.id && currentSession.id !== autoLoadedSessionId) {
+      autoLoadedSessionId = currentSession.id
       void session.loadScripts()
+    }
+    if (phase === 'idle') {
+      autoLoadedSessionId = null
     }
   })
 

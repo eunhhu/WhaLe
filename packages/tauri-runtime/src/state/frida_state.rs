@@ -60,6 +60,7 @@ pub enum FridaRequest {
     SpawnAttach {
         device_id: String,
         program: String,
+        realm: Option<String>,
         reply: channel::Sender<FridaResponse>,
     },
     Resume {
@@ -70,6 +71,7 @@ pub enum FridaRequest {
     Attach {
         device_id: String,
         pid: u32,
+        realm: Option<String>,
         reply: channel::Sender<FridaResponse>,
     },
     LoadScript {
@@ -105,7 +107,16 @@ fn env_flag_enabled(name: &str, default_enabled: bool) -> bool {
 
 fn devtools_frida_log_stream_enabled() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();
-    *ENABLED.get_or_init(|| env_flag_enabled("WHALE_DEVTOOLS_FRIDA_LOG", false))
+    *ENABLED.get_or_init(|| env_flag_enabled("WHALE_DEVTOOLS_FRIDA_LOG", true))
+}
+
+fn emit_devtools_frida_log(app: &AppHandle, level: &str, message: String) {
+    let payload = serde_json::json!({
+        "source": "frida",
+        "level": level,
+        "message": message,
+    });
+    let _ = app.emit("devtools:log", &payload);
 }
 
 // ---------------------------------------------------------------------------
@@ -137,13 +148,10 @@ impl frida::ScriptHandler for WhaleScriptHandler {
                     log_msg.payload
                 );
                 if cfg!(debug_assertions) && devtools_frida_log_stream_enabled() {
-                    let _ = self.app.emit(
-                        "devtools:log",
-                        &serde_json::json!({
-                            "source": "frida",
-                            "level": format!("{:?}", log_msg.level).to_lowercase(),
-                            "message": &log_msg.payload,
-                        }),
+                    emit_devtools_frida_log(
+                        &self.app,
+                        &format!("{:?}", log_msg.level).to_lowercase(),
+                        log_msg.payload.clone(),
                     );
                 }
             }
@@ -156,11 +164,17 @@ impl frida::ScriptHandler for WhaleScriptHandler {
                     err_msg.column_number
                 );
                 if cfg!(debug_assertions) && devtools_frida_log_stream_enabled() {
-                    let _ = self.app.emit("devtools:log", &serde_json::json!({
-                        "source": "frida",
-                        "level": "error",
-                        "message": format!("{} at {}:{}:{}", err_msg.description, err_msg.file_name, err_msg.line_number, err_msg.column_number),
-                    }));
+                    emit_devtools_frida_log(
+                        &self.app,
+                        "error",
+                        format!(
+                            "{} at {}:{}:{}",
+                            err_msg.description,
+                            err_msg.file_name,
+                            err_msg.line_number,
+                            err_msg.column_number
+                        ),
+                    );
                 }
             }
             frida::Message::Other(ref val) => {
@@ -311,8 +325,29 @@ impl FridaManager {
                     FridaRequest::SpawnAttach {
                         device_id,
                         program,
+                        realm,
                         reply,
                     } => {
+                        let normalized_realm = realm
+                            .as_deref()
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                            .map(|s| s.to_ascii_lowercase());
+                        if matches!(normalized_realm.as_deref(), Some("emulated")) {
+                            let _ = reply.send(FridaResponse::SpawnAttach(Err(
+                                "SpawnAttach realm \"emulated\" is not supported by this runtime yet. Use \"native\" or omit realm.".to_string(),
+                            )));
+                            continue;
+                        }
+                        if let Some(other) = normalized_realm.as_deref() {
+                            if other != "native" {
+                                let _ = reply.send(FridaResponse::SpawnAttach(Err(format!(
+                                    "Invalid spawn_attach realm: {} (expected \"native\" or \"emulated\")",
+                                    other
+                                ))));
+                                continue;
+                            }
+                        }
                         match device_manager.get_device_by_id(&device_id) {
                             Ok(mut device) => {
                                 let opts = frida::SpawnOptions::new();
@@ -393,8 +428,29 @@ impl FridaManager {
                     FridaRequest::Attach {
                         device_id,
                         pid,
+                        realm,
                         reply,
                     } => {
+                        let normalized_realm = realm
+                            .as_deref()
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                            .map(|s| s.to_ascii_lowercase());
+                        if matches!(normalized_realm.as_deref(), Some("emulated")) {
+                            let _ = reply.send(FridaResponse::SessionId(Err(
+                                "Attach realm \"emulated\" is not supported by this runtime yet. Use \"native\" or omit realm.".to_string(),
+                            )));
+                            continue;
+                        }
+                        if let Some(other) = normalized_realm.as_deref() {
+                            if other != "native" {
+                                let _ = reply.send(FridaResponse::SessionId(Err(format!(
+                                    "Invalid attach realm: {} (expected \"native\" or \"emulated\")",
+                                    other
+                                ))));
+                                continue;
+                            }
+                        }
                         match device_manager.get_device_by_id(&device_id) {
                             Ok(device) => match device.attach(pid) {
                                 Ok(session) => {

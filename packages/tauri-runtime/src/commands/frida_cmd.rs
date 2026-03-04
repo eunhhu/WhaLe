@@ -4,7 +4,8 @@ use crate::state::frida_state::{
     SpawnAttachData,
 };
 use crate::state::store_state::StoreManager;
-use tauri::{AppHandle, Emitter, State};
+use std::path::PathBuf;
+use tauri::{AppHandle, Emitter, Manager, State};
 
 // ---------------------------------------------------------------------------
 // Helper: send a request to the frida worker and extract the typed response
@@ -42,10 +43,12 @@ fn request_spawn_attach(
     frida: &FridaSender,
     device_id: String,
     program: String,
+    realm: Option<String>,
 ) -> Result<SpawnAttachData, String> {
     match frida.send(|reply| FridaRequest::SpawnAttach {
         device_id,
         program,
+        realm,
         reply,
     }) {
         FridaResponse::SpawnAttach(r) => r,
@@ -64,10 +67,16 @@ fn request_resume(frida: &FridaSender, device_id: String, pid: u32) -> Result<()
     }
 }
 
-fn request_attach(frida: &FridaSender, device_id: String, pid: u32) -> Result<String, String> {
+fn request_attach(
+    frida: &FridaSender,
+    device_id: String,
+    pid: u32,
+    realm: Option<String>,
+) -> Result<String, String> {
     match frida.send(|reply| FridaRequest::Attach {
         device_id,
         pid,
+        realm,
         reply,
     }) {
         FridaResponse::SessionId(r) => r,
@@ -116,16 +125,55 @@ fn resolve_spawn_target(
 }
 
 fn emit_devtools_frida_log(app: &AppHandle, level: &str, message: String) {
-    if cfg!(debug_assertions) {
-        let _ = app.emit(
-            "devtools:log",
-            &serde_json::json!({
-                "source": "frida",
-                "level": level,
-                "message": message,
-            }),
-        );
+    let payload = serde_json::json!({
+        "source": "frida",
+        "level": level,
+        "message": message,
+    });
+    let _ = app.emit("devtools:log", &payload);
+}
+
+fn resolve_script_file_path(app: &AppHandle, raw_path: &str) -> Result<PathBuf, String> {
+    let input = PathBuf::from(raw_path);
+    if input.is_absolute() {
+        return Ok(input);
     }
+
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Ok(cwd) = std::env::current_dir() {
+        candidates.push(cwd.join(&input));
+        if let Some(parent) = cwd.parent() {
+            candidates.push(parent.join(&input));
+        }
+    }
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        candidates.push(resource_dir.join(&input));
+        if let Some(parent) = resource_dir.parent() {
+            candidates.push(parent.join(&input));
+        }
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            candidates.push(exe_dir.join(&input));
+            if let Some(parent) = exe_dir.parent() {
+                candidates.push(parent.join(&input));
+            }
+        }
+    }
+
+    if let Some(found) = candidates.iter().find(|candidate| candidate.is_file()) {
+        return Ok(found.clone());
+    }
+
+    let attempted = candidates
+        .iter()
+        .map(|candidate| candidate.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    Err(format!(
+        "Failed to resolve script file {}. Tried: {}",
+        raw_path, attempted
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -204,13 +252,15 @@ pub async fn frida_spawn_attach(
     device_id: String,
     program: Option<String>,
     bundle_id: Option<String>,
+    realm: Option<String>,
 ) -> Result<SpawnAttachData, String> {
     let target_program = resolve_spawn_target(program, bundle_id)?;
     let sender = frida.inner().clone_sender();
     let log_device_id = device_id.clone();
     let log_target_program = target_program.clone();
+    let log_realm = realm.clone().unwrap_or_else(|| "native".to_string());
     let result = tauri::async_runtime::spawn_blocking(move || {
-        request_spawn_attach(&sender, device_id, target_program)
+        request_spawn_attach(&sender, device_id, target_program, realm)
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))?;
@@ -220,16 +270,16 @@ pub async fn frida_spawn_attach(
             &app,
             "info",
             format!(
-                "spawn_attach succeeded device={} program={} pid={} session={}",
-                log_device_id, log_target_program, data.pid, data.session_id
+                "spawn_attach succeeded device={} program={} realm={} pid={} session={}",
+                log_device_id, log_target_program, log_realm, data.pid, data.session_id
             ),
         ),
         Err(err) => emit_devtools_frida_log(
             &app,
             "error",
             format!(
-                "spawn_attach failed device={} program={} error={}",
-                log_device_id, log_target_program, err
+                "spawn_attach failed device={} program={} realm={} error={}",
+                log_device_id, log_target_program, log_realm, err
             ),
         ),
     }
@@ -240,14 +290,54 @@ pub async fn frida_spawn_attach(
 /// Resume a spawned process
 #[tauri::command]
 pub async fn frida_resume(
+    app: AppHandle,
     frida: State<'_, FridaManager>,
     device_id: String,
     pid: u32,
 ) -> Result<(), String> {
     let sender = frida.inner().clone_sender();
-    tauri::async_runtime::spawn_blocking(move || request_resume(&sender, device_id, pid))
-        .await
-        .map_err(|e| format!("Task join error: {}", e))?
+    let log_device_id = device_id.clone();
+    emit_devtools_frida_log(
+        &app,
+        "info",
+        format!("resume requested device={} pid={}", log_device_id, pid),
+    );
+
+    let join_result =
+        tauri::async_runtime::spawn_blocking(move || request_resume(&sender, device_id, pid)).await;
+    let result = match join_result {
+        Ok(result) => result,
+        Err(e) => {
+            let err = format!("Task join error: {}", e);
+            emit_devtools_frida_log(
+                &app,
+                "error",
+                format!(
+                    "resume failed device={} pid={} error={}",
+                    log_device_id, pid, err
+                ),
+            );
+            return Err(err);
+        }
+    };
+
+    match &result {
+        Ok(()) => emit_devtools_frida_log(
+            &app,
+            "info",
+            format!("resume succeeded device={} pid={}", log_device_id, pid),
+        ),
+        Err(err) => emit_devtools_frida_log(
+            &app,
+            "error",
+            format!(
+                "resume failed device={} pid={} error={}",
+                log_device_id, pid, err
+            ),
+        ),
+    }
+
+    result
 }
 
 /// Attach to a process on a device
@@ -257,13 +347,39 @@ pub async fn frida_attach(
     frida: State<'_, FridaManager>,
     device_id: String,
     pid: u32,
+    realm: Option<String>,
 ) -> Result<String, String> {
     let sender = frida.inner().clone_sender();
     let log_device_id = device_id.clone();
-    let result =
-        tauri::async_runtime::spawn_blocking(move || request_attach(&sender, device_id, pid))
-            .await
-            .map_err(|e| format!("Task join error: {}", e))?;
+    let log_realm = realm.clone().unwrap_or_else(|| "native".to_string());
+    emit_devtools_frida_log(
+        &app,
+        "info",
+        format!(
+            "attach requested device={} pid={} realm={}",
+            log_device_id, pid, log_realm
+        ),
+    );
+
+    let join_result = tauri::async_runtime::spawn_blocking(move || {
+        request_attach(&sender, device_id, pid, realm)
+    })
+    .await;
+    let result = match join_result {
+        Ok(result) => result,
+        Err(e) => {
+            let err = format!("Task join error: {}", e);
+            emit_devtools_frida_log(
+                &app,
+                "error",
+                format!(
+                    "attach failed device={} pid={} realm={} error={}",
+                    log_device_id, pid, log_realm, err
+                ),
+            );
+            return Err(err);
+        }
+    };
 
     match &result {
         Ok(session_id) => emit_devtools_frida_log(
@@ -278,8 +394,8 @@ pub async fn frida_attach(
             &app,
             "error",
             format!(
-                "attach failed device={} pid={} error={}",
-                log_device_id, pid, err
+                "attach failed device={} pid={} realm={} error={}",
+                log_device_id, pid, log_realm, err
             ),
         ),
     }
@@ -312,11 +428,37 @@ pub async fn frida_load_script(
     let sender = frida.inner().clone_sender();
     let log_session_id = session_id.clone();
     let log_store_name = store_name.clone();
-    let result = tauri::async_runtime::spawn_blocking(move || {
+    emit_devtools_frida_log(
+        &app,
+        "info",
+        format!(
+            "load_script requested session={} store={}",
+            log_session_id,
+            log_store_name.as_deref().unwrap_or("-")
+        ),
+    );
+
+    let join_result = tauri::async_runtime::spawn_blocking(move || {
         request_load_script(&sender, session_id, final_code, store_name)
     })
-    .await
-    .map_err(|e| format!("Task join error: {}", e))?;
+    .await;
+    let result = match join_result {
+        Ok(result) => result,
+        Err(e) => {
+            let err = format!("Task join error: {}", e);
+            emit_devtools_frida_log(
+                &app,
+                "error",
+                format!(
+                    "load_script failed session={} store={} error={}",
+                    log_session_id,
+                    log_store_name.as_deref().unwrap_or("-"),
+                    err
+                ),
+            );
+            return Err(err);
+        }
+    };
 
     match &result {
         Ok(script_id) => emit_devtools_frida_log(
@@ -354,8 +496,71 @@ pub async fn frida_load_script_file(
     path: String,
     store_name: Option<String>,
 ) -> Result<String, String> {
-    let code = std::fs::read_to_string(&path)
-        .map_err(|e| format!("Failed to read script file {}: {}", path, e))?;
+    let log_session_id = session_id.clone();
+    let log_store_name = store_name.clone();
+    let log_path = path.clone();
+    emit_devtools_frida_log(
+        &app,
+        "info",
+        format!(
+            "load_script_file requested session={} file={} store={}",
+            log_session_id,
+            log_path,
+            log_store_name.as_deref().unwrap_or("-")
+        ),
+    );
+
+    let resolved_path = match resolve_script_file_path(&app, &path) {
+        Ok(found) => found,
+        Err(err) => {
+            emit_devtools_frida_log(
+                &app,
+                "error",
+                format!(
+                    "load_script_file failed session={} file={} store={} error={}",
+                    log_session_id,
+                    log_path,
+                    log_store_name.as_deref().unwrap_or("-"),
+                    err
+                ),
+            );
+            return Err(err);
+        }
+    };
+
+    emit_devtools_frida_log(
+        &app,
+        "debug",
+        format!(
+            "load_script_file resolved session={} file={} -> {}",
+            log_session_id,
+            log_path,
+            resolved_path.display()
+        ),
+    );
+
+    let code = match std::fs::read_to_string(&resolved_path) {
+        Ok(code) => code,
+        Err(e) => {
+            let err = format!(
+                "Failed to read script file {}: {}",
+                resolved_path.display(),
+                e
+            );
+            emit_devtools_frida_log(
+                &app,
+                "error",
+                format!(
+                    "load_script_file failed session={} file={} store={} error={}",
+                    log_session_id,
+                    log_path,
+                    log_store_name.as_deref().unwrap_or("-"),
+                    err
+                ),
+            );
+            return Err(err);
+        }
+    };
 
     // Build final code with preamble if store_name is provided
     let final_code = if let Some(ref name) = store_name {
@@ -370,14 +575,28 @@ pub async fn frida_load_script_file(
     };
 
     let sender = frida.inner().clone_sender();
-    let log_session_id = session_id.clone();
-    let log_store_name = store_name.clone();
-    let log_path = path.clone();
-    let result = tauri::async_runtime::spawn_blocking(move || {
+    let join_result = tauri::async_runtime::spawn_blocking(move || {
         request_load_script(&sender, session_id, final_code, store_name)
     })
-    .await
-    .map_err(|e| format!("Task join error: {}", e))?;
+    .await;
+    let result = match join_result {
+        Ok(result) => result,
+        Err(e) => {
+            let err = format!("Task join error: {}", e);
+            emit_devtools_frida_log(
+                &app,
+                "error",
+                format!(
+                    "load_script_file failed session={} file={} store={} error={}",
+                    log_session_id,
+                    log_path,
+                    log_store_name.as_deref().unwrap_or("-"),
+                    err
+                ),
+            );
+            return Err(err);
+        }
+    };
 
     match &result {
         Ok(script_id) => emit_devtools_frida_log(

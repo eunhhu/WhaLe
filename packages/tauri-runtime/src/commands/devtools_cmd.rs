@@ -14,8 +14,6 @@ pub fn devtools_list_stores(
 
 /// Return all registered hotkeys
 #[tauri::command]
-pub fn devtools_list_hotkeys(
-    input_manager: State<'_, InputManager>,
-) -> Vec<HotkeyEntry> {
+pub fn devtools_list_hotkeys(input_manager: State<'_, InputManager>) -> Vec<HotkeyEntry> {
     input_manager.list_hotkeys()
 }

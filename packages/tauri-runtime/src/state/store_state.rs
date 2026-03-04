@@ -79,7 +79,11 @@ impl StoreManager {
         self.merge_patch_ref(name, &patch).is_some()
     }
 
-    pub fn merge_patch_ref(&self, name: &str, patch: &HashMap<String, Value>) -> Option<Vec<String>> {
+    pub fn merge_patch_ref(
+        &self,
+        name: &str,
+        patch: &HashMap<String, Value>,
+    ) -> Option<Vec<String>> {
         let mut stores = self.inner.stores.lock().unwrap();
         if let Some(store) = stores.get_mut(name) {
             let mut changed_keys = Vec::new();
@@ -179,9 +183,7 @@ impl StoreManager {
         };
         store_subs
             .iter()
-            .filter(|(_label, keys)| {
-                changed_keys.iter().any(|ck| keys.contains(ck.as_str()))
-            })
+            .filter(|(_label, keys)| changed_keys.iter().any(|ck| keys.contains(ck.as_str())))
             .map(|(label, _)| label.clone())
             .collect()
     }
@@ -323,7 +325,11 @@ mod tests {
     #[test]
     fn test_subscribe_and_get_subscribed_windows() {
         let mgr = StoreManager::new(None);
-        mgr.subscribe("trainer", "overlay", vec!["speed".to_string(), "hp".to_string()]);
+        mgr.subscribe(
+            "trainer",
+            "overlay",
+            vec!["speed".to_string(), "hp".to_string()],
+        );
         mgr.subscribe("trainer", "main", vec!["speed".to_string()]);
 
         let changed = vec!["speed".to_string()];
@@ -421,7 +427,10 @@ mod tests {
 
         mgr.set_persist_enabled(false);
         mgr.flush();
-        assert!(!path.exists(), "flush should not write while persist is disabled");
+        assert!(
+            !path.exists(),
+            "flush should not write while persist is disabled"
+        );
 
         let _ = fs::remove_dir_all(&dir);
     }
@@ -442,7 +451,10 @@ mod tests {
         assert!(!path.exists(), "writes should stay suspended");
 
         mgr.set_persist_enabled(true);
-        assert!(path.exists(), "re-enabling persist should flush dirty state");
+        assert!(
+            path.exists(),
+            "re-enabling persist should flush dirty state"
+        );
 
         let content = fs::read_to_string(&path).unwrap();
         let parsed: HashMap<String, HashMap<String, Value>> =
@@ -482,7 +494,10 @@ mod tests {
         // Remove file, flush again — file should NOT reappear
         let _ = fs::remove_file(&path);
         mgr.flush();
-        assert!(!path.exists(), "second flush without changes should not write");
+        assert!(
+            !path.exists(),
+            "second flush without changes should not write"
+        );
 
         let _ = fs::remove_dir_all(&dir);
     }
@@ -503,7 +518,10 @@ mod tests {
         mgr.merge_patch("s", patch);
 
         mgr.flush();
-        assert!(path.exists(), "merge_patch should set dirty, flush should write");
+        assert!(
+            path.exists(),
+            "merge_patch should set dirty, flush should write"
+        );
 
         let _ = fs::remove_dir_all(&dir);
     }

@@ -28,7 +28,7 @@ fn emit_visibility(app: &AppHandle, id: &str, visible: bool) {
 fn apply_macos_window_background(window: &tauri::WebviewWindow, transparent: bool) {
     let _ = window.with_webview(move |webview| unsafe {
         use objc2_app_kit::NSColor;
-        use objc2_foundation::{NSString, NSObjectNSKeyValueCoding};
+        use objc2_foundation::{NSObjectNSKeyValueCoding, NSString};
 
         let ns_win: &objc2_app_kit::NSWindow = &*webview.ns_window().cast();
         let wv: &objc2_web_kit::WKWebView = &*webview.inner().cast();
@@ -41,7 +41,10 @@ fn apply_macos_window_background(window: &tauri::WebviewWindow, transparent: boo
             ns_win.setBackgroundColor(Some(&NSColor::clearColor()));
         } else {
             let bg = NSColor::colorWithSRGBRed_green_blue_alpha(
-                15.0 / 255.0, 15.0 / 255.0, 23.0 / 255.0, 1.0,
+                15.0 / 255.0,
+                15.0 / 255.0,
+                23.0 / 255.0,
+                1.0,
             );
             ns_win.setBackgroundColor(Some(&bg));
         }

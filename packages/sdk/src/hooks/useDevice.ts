@@ -1,14 +1,14 @@
 import { createSignal, onMount } from 'solid-js'
 import type { Accessor } from 'solid-js'
 import type { Device, Session, SpawnOptions, Process } from '../types'
-import { safeInvoke, safeInvokeVoid } from '../tauri'
+import { safeInvoke } from '../tauri'
 
 export interface DeviceHandle {
   device: Accessor<Device | null>
   status: Accessor<'searching' | 'connected' | 'disconnected'>
   refresh(): Promise<void>
   spawn(program: string, opts?: SpawnOptions): Promise<Session>
-  attach(pid: number): Promise<Session>
+  attach(pid: number, realm?: Realm): Promise<Session>
   enumerateProcesses(): Promise<Process[]>
   resume(pid: number): Promise<void>
 }
@@ -18,6 +18,7 @@ interface SpawnAttachPayload {
   pid: number
 }
 
+type Realm = 'emulated' | 'native'
 type SpawnAttachSupport = 'unknown' | 'supported' | 'unsupported'
 let spawnAttachSupport: SpawnAttachSupport = 'unknown'
 let spawnAttachRetryAfter = 0
@@ -63,15 +64,19 @@ export function useDevice(filter?: { type?: 'usb' | 'local' | 'remote'; id?: str
     // Backward-compatible fallback when runtime doesn't expose frida_spawn_attach yet.
     const pid = await safeInvoke<number>('frida_spawn', { deviceId: dev.id, program, ...(opts || {}) })
     if (typeof pid !== 'number') throw new Error('Failed to spawn process')
-    const sessionId = await safeInvoke<string>('frida_attach', { deviceId: dev.id, pid })
+    const sessionId = await safeInvoke<string>('frida_attach', {
+      deviceId: dev.id,
+      pid,
+      ...(opts?.realm ? { realm: opts.realm } : {}),
+    })
     if (!sessionId) throw new Error('Failed to attach session')
     return { id: sessionId, pid }
   }
 
-  const attach = async (pid: number): Promise<Session> => {
+  const attach = async (pid: number, realm?: Realm): Promise<Session> => {
     const dev = device()
     if (!dev) throw new Error('No device connected')
-    const sessionId = await safeInvoke<string>('frida_attach', { deviceId: dev.id, pid })
+    const sessionId = await safeInvoke<string>('frida_attach', { deviceId: dev.id, pid, ...(realm ? { realm } : {}) })
     if (!sessionId) throw new Error('Failed to attach session')
     return { id: sessionId, pid }
   }
@@ -86,7 +91,8 @@ export function useDevice(filter?: { type?: 'usb' | 'local' | 'remote'; id?: str
   const resume = async (pid: number): Promise<void> => {
     const dev = device()
     if (!dev) throw new Error('No device connected')
-    await safeInvokeVoid('frida_resume', { deviceId: dev.id, pid })
+    const result = await safeInvoke<null>('frida_resume', { deviceId: dev.id, pid })
+    if (typeof result === 'undefined') throw new Error(`Failed to resume PID ${pid}`)
   }
 
   return { device, status, refresh: findDevice, spawn, attach, enumerateProcesses, resume }
