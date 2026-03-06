@@ -9,13 +9,13 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p src/script/tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@whale1/sdk": "workspace:*",
-    "@whale1/ui": "workspace:*",
+    "@whale1/sdk": "^0.1.2",
+    "@whale1/ui": "^0.1.2",
     "solid-js": "^1.9.11"
   },
   "devDependencies": {
     "@types/frida-gum": "^19.0.2",
-    "@whale1/cli": "workspace:*",
+    "@whale1/cli": "^0.1.2",
     "typescript": "^5.9.3"
   }
 }
